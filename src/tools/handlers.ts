@@ -873,6 +873,15 @@ export async function handleRecallMemories(args) {
     const memoryBlocks = responseText.split('\n\n').filter(block => block.includes('**') && (block.includes('ID:') || block.includes('Memory ID') || block.includes('memory_id') || /[0-9a-f]{8}-[0-9a-f]{4}/.test(block)));
 
     if (memoryBlocks.length === 0) {
+      // DEBUG: log what the API actually returned so we can understand the format
+      structuredLog.warn(`${toolName}: fallback triggered — memoryBlocks=0`, {
+        tool_name: toolName,
+        request_id: requestId,
+        response_length: responseText.length,
+        response_preview: responseText.slice(0, 500),
+        duration_ms: Date.now() - startTime,
+      });
+
       structuredLog.info(`${toolName}: completed`, {
         tool_name: toolName,
         request_id: requestId,
