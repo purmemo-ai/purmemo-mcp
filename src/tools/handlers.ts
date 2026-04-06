@@ -808,7 +808,9 @@ export async function handleRecallMemories(args) {
     if (localResults && localResults.length > 0) {
       localSection = `📍 **Local Sessions** (from purmemoAMP — ${localResults.length} found)\n\n`;
       localResults.forEach((r, i) => {
-        const title = r.title || 'Untitled';
+        // Truncate title — AMP may return AI extraction prompt as title for untitled sessions
+        const rawTitle = r.title || '';
+        const title = rawTitle.length > 80 ? rawTitle.slice(0, 80) + '…' : (rawTitle || 'Untitled');
         const project = r.project ? ` (${r.project})` : '';
         const snippet = r.snippet ? `\n   📝 ${r.snippet.slice(0, 200)}` : '';
         localSection += `${i + 1}. 💻 **${title}**${project}${snippet}\n`;
