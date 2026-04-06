@@ -1,9 +1,9 @@
 name: Auto-Deploy with Safety Checks
 
-# Runs automatically every time you push to main
+# Disabled: backend migrated from Python/FastAPI (v1-mvp/backend) to
+# Hono/TypeScript (purmemo-api/). Render auto-deploys on push.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch: # manual trigger only
 
 jobs:
   auto-safety-deploy:
