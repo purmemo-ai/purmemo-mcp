@@ -773,6 +773,22 @@ export async function handleDiscoverRelated(args) {
   }
 }
 
+// ── Local-first recall via purmemoAMP (localhost:7832) ──────────────────────
+async function tryLocalRecall(query, limit = 5) {
+  try {
+    const encoded = encodeURIComponent(query).replace(/%20/g, '+');
+    const resp = await fetch(`http://localhost:7832/search?q=${encoded}&limit=${limit}`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!data.results || data.results.length === 0) return null;
+    return data.results;
+  } catch {
+    return null; // AMP not running or timeout — fall through to cloud
+  }
+}
+
 export async function handleRecallMemories(args) {
   const toolName = 'recall_memories';
   const requestId = `${toolName}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
@@ -785,6 +801,28 @@ export async function handleRecallMemories(args) {
 
   try {
     const safeQuery = sanitizeUnicode(args.query || '');
+
+    // ── Local-first: try purmemoAMP before cloud ──
+    const localResults = await tryLocalRecall(safeQuery, parseInt(args.limit) || 10);
+    let localSection = '';
+    if (localResults && localResults.length > 0) {
+      localSection = `📍 **Local Sessions** (from purmemoAMP — ${localResults.length} found)\n\n`;
+      localResults.forEach((r, i) => {
+        const title = r.title || 'Untitled';
+        const project = r.project ? ` (${r.project})` : '';
+        const snippet = r.snippet ? `\n   📝 ${r.snippet.slice(0, 200)}` : '';
+        localSection += `${i + 1}. 💻 **${title}**${project}${snippet}\n`;
+        localSection += `   🔗 Session: ${r.session_id}\n\n`;
+      });
+      localSection += `${'─'.repeat(40)}\n\n`;
+
+      structuredLog.info(`${toolName}: local results`, {
+        tool_name: toolName,
+        request_id: requestId,
+        local_count: localResults.length,
+        duration_ms: Date.now() - startTime,
+      });
+    }
 
     const data = await makeApiCall(`/api/v10/mcp/tools/execute`, {
       method: 'POST',
@@ -813,6 +851,15 @@ export async function handleRecallMemories(args) {
         query: safeQuery
       });
 
+      // Cloud found nothing — but local might have results
+      if (localSection) {
+        return {
+          content: [{
+            type: 'text',
+            text: localSection + `\n☁️ No cloud memories found for "${safeQuery}" — showing local results only.`
+          }]
+        };
+      }
       return {
         content: [{
           type: 'text',
@@ -823,7 +870,7 @@ export async function handleRecallMemories(args) {
 
     const responseText = data.content[0].text;
 
-    const memoryBlocks = responseText.split('\n\n').filter(block => block.includes('**') && block.includes('ID:'));
+    const memoryBlocks = responseText.split('\n\n').filter(block => block.includes('**') && (block.includes('ID:') || block.includes('Memory ID') || block.includes('memory_id') || /[0-9a-f]{8}-[0-9a-f]{4}/.test(block)));
 
     if (memoryBlocks.length === 0) {
       structuredLog.info(`${toolName}: completed`, {
@@ -833,8 +880,14 @@ export async function handleRecallMemories(args) {
         results_count: 0
       });
 
+      // Truncate raw response to prevent token overflow (API format may not match expected pattern)
+      const MAX_RAW_CHARS = 8000;
+      const truncated = responseText.length > MAX_RAW_CHARS
+        ? sanitizeUnicode(responseText.slice(0, MAX_RAW_CHARS)) + `\n\n[... truncated ${responseText.length - MAX_RAW_CHARS} chars — use get_memory_details for full content]`
+        : sanitizeUnicode(responseText);
+
       return {
-        content: [{ type: 'text', text: sanitizeUnicode(responseText) }]
+        content: [{ type: 'text', text: truncated }]
       };
     }
 
@@ -894,7 +947,8 @@ export async function handleRecallMemories(args) {
     resultText += `conversations across ALL platforms (ChatGPT, Claude, Gemini).\n`;
     resultText += `Automatically grouped by AI-organized semantic clusters!\n`;
 
-    const finalSanitizedText = sanitizeUnicode(resultText);
+    // Prepend local results if available
+    const finalSanitizedText = sanitizeUnicode(localSection + resultText);
 
     structuredLog.info(`${toolName}: completed`, {
       tool_name: toolName,
@@ -969,6 +1023,20 @@ export async function handleGetMemoryDetails(args) {
     include_linked_parts: args.includeLinkedParts
   });
 
+  // ── Try AMP for local session details (non-blocking, enrichment only) ──
+  let localDetails = '';
+  try {
+    const synopsisResp = await fetch(`http://localhost:7832/sessions/${resolvedId}/synopsis`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    if (synopsisResp.ok) {
+      const synopsisData = await synopsisResp.json();
+      if (synopsisData.synopsis) {
+        localDetails = `📍 **Local Session Details** (from purmemoAMP)\n\n${synopsisData.synopsis}\n\n${'─'.repeat(40)}\n\n`;
+      }
+    }
+  } catch { /* AMP not running — continue to cloud */ }
+
   try {
     const data = await makeApiCall(`/api/v10/mcp/tools/execute`, {
       method: 'POST',
@@ -1004,12 +1072,16 @@ export async function handleGetMemoryDetails(args) {
     // Pass through all content blocks (text + image) from API
     const contentBlocks = data.content.map((block: any) => {
       if (block.type === 'image') {
-        // Pass through image blocks directly (base64 image)
         return { type: 'image', data: block.data, mimeType: block.mimeType };
       }
-      // Sanitize text blocks
+      // Prepend local details to first text block if available
       return { type: 'text', text: sanitizeUnicode(block.text || '') };
     });
+
+    // Prepend local session details if available
+    if (localDetails && contentBlocks.length > 0) {
+      contentBlocks.unshift({ type: 'text', text: localDetails });
+    }
 
     structuredLog.info(`${toolName}: completed`, {
       tool_name: toolName,
@@ -1017,6 +1089,7 @@ export async function handleGetMemoryDetails(args) {
       duration_ms: Date.now() - startTime,
       memory_id: resolvedId,
       content_blocks: contentBlocks.length,
+      has_local: !!localDetails,
       has_image: contentBlocks.some((b: any) => b.type === 'image')
     });
 
@@ -1033,6 +1106,16 @@ export async function handleGetMemoryDetails(args) {
       error_message: error.message,
       error_type: error.constructor.name
     });
+
+    // Cloud failed — return local details if we have them
+    if (localDetails) {
+      return {
+        content: [{
+          type: 'text',
+          text: localDetails + `\n⚠️ Cloud lookup failed: ${errorMsg}\nShowing local data only.`
+        }]
+      };
+    }
 
     return {
       content: [{
