@@ -1911,6 +1911,117 @@ export async function handleGetAcknowledgedErrors(args) {
   }
 }
 
+export async function handleGetNextTask(args) {
+  try {
+    const projectName = (args.project_name || '').trim();
+    if (!projectName) {
+      return {
+        content: [{
+          type: 'text',
+          text: '❌ Missing required field: project_name'
+        }]
+      };
+    }
+
+    const sessionId = readCurrentSessionId();
+    const headers: Record<string, string> = {};
+    if (sessionId) headers['x-session-id'] = sessionId;
+
+    const response = await makeApiCall(
+      `/api/v1/projects/${encodeURIComponent(projectName)}/next_task`,
+      { method: 'GET', headers }
+    );
+
+    if (!response.task) {
+      return {
+        content: [{
+          type: 'text',
+          text: `✅ No pending tasks for project "${projectName}". All done!`
+        }]
+      };
+    }
+
+    const task = response.task;
+    const lines = [
+      `📋 NEXT TASK — ${projectName}`,
+      ``,
+      `Task #${task.sequence}: ${task.title}`,
+      task.description ? `\nDescription:\n${task.description}` : '',
+      task.acceptance_criteria ? `\nAcceptance Criteria:\n${task.acceptance_criteria}` : '',
+      task.context_brief ? `\nPRD Context:\n${task.context_brief}` : '',
+      ``,
+      `Task ID: ${task.id}`,
+      `Remaining after this: ${Math.max(0, task.total_remaining - 1)} pending task(s)`,
+      ``,
+      `When done, call complete_task({ task_id: "${task.id}", verification_summary: "..." })`
+    ].filter(l => l !== undefined).join('\n');
+
+    return {
+      content: [{
+        type: 'text',
+        text: lines
+      }]
+    };
+
+  } catch (error) {
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ Error fetching next task: ${error.message}`
+      }]
+    };
+  }
+}
+
+export async function handleCompleteTask(args) {
+  try {
+    const taskId = (args.task_id || '').trim();
+    const verificationSummary = (args.verification_summary || '').trim();
+
+    if (!taskId) {
+      return { content: [{ type: 'text', text: '❌ Missing required field: task_id' }] };
+    }
+    if (!verificationSummary) {
+      return { content: [{ type: 'text', text: '❌ Missing required field: verification_summary' }] };
+    }
+
+    // Extract project name from task_id context — passed separately or derived at call time
+    const projectName = (args.project_name || '').trim();
+    if (!projectName) {
+      return { content: [{ type: 'text', text: '❌ Missing required field: project_name' }] };
+    }
+
+    const response = await makeApiCall(
+      `/api/v1/projects/${encodeURIComponent(projectName)}/tasks/${encodeURIComponent(taskId)}/complete`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ verification_summary: verificationSummary }),
+      }
+    );
+
+    if (response.error) {
+      return { content: [{ type: 'text', text: `❌ ${response.error}` }] };
+    }
+
+    const { completed, next_task, message } = response;
+    const lines = [
+      `✅ ${message}`,
+      ``,
+      `Completed: Task #${completed.sequence} — ${completed.title}`,
+    ];
+
+    if (next_task) {
+      lines.push(``, `⬇️  Next: Task #${next_task.sequence} — ${next_task.title}`);
+      lines.push(`Call get_next_task({ project_name: "${projectName}" }) to begin.`);
+    }
+
+    return { content: [{ type: 'text', text: lines.join('\n') }] };
+
+  } catch (error) {
+    return { content: [{ type: 'text', text: `❌ Error completing task: ${error.message}` }] };
+  }
+}
+
 export async function handleSaveInvestigation(args) {
   try {
     if (!args.incident_id) {

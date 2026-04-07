@@ -81,7 +81,9 @@ import {
   handleGetPublicMemory,
   handleReportMemory,
   handleGetAcknowledgedErrors,
-  handleSaveInvestigation
+  handleSaveInvestigation,
+  handleGetNextTask,
+  handleCompleteTask
 } from './tools/handlers.js';
 import { handleGenerateHandoffBrief } from './tools/handoff.js';
 import { createRequire } from 'module';
@@ -1127,6 +1129,81 @@ No new data is generated — composes from your existing V2 intelligence extract
       },
       required: []
     }
+  },
+  {
+    name: 'get_next_task',
+    annotations: {
+      title: 'Get Next Task',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true
+    },
+    description: `Get the next pending task for a project and mark it active.
+
+Fetches the lowest-sequence pending task from project_tasks, sets its status to 'active',
+and returns the task details plus a brief from the linked PRD memory.
+
+Call this at the start of a work session to pick up where you left off.
+When done, call complete_task({ task_id, verification_summary }) to close the loop.
+
+RETURNS:
+- task.id — use this in complete_task
+- task.sequence — task order number
+- task.title — what to do
+- task.description — how to do it
+- task.acceptance_criteria — how to know it's done
+- task.context_brief — first 500 chars of the PRD for context
+- task.total_remaining — pending tasks left (including this one)`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_name: {
+          type: 'string',
+          description: 'The project name to fetch the next task for (e.g. "purmemo")'
+        }
+      },
+      required: ['project_name']
+    }
+  },
+  {
+    name: 'complete_task',
+    annotations: {
+      title: 'Complete Task',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true
+    },
+    description: `Mark a project task as done and close the Jered Loop for this session.
+
+Sets status='done', records completion_summary, clears active_session_id.
+Returns the next pending task so you know what comes next before closing.
+
+Call this BEFORE ending a session — Jered's rule: consciously close each task.
+
+RETURNS:
+- completed — the task that was just finished
+- next_task — { id, sequence, title } of next pending task, or null if all done
+- message — "Task complete. N tasks remaining." or "Task complete. All tasks done!"`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_name: {
+          type: 'string',
+          description: 'The project name (e.g. "purmemo")'
+        },
+        task_id: {
+          type: 'string',
+          description: 'The task UUID from get_next_task'
+        },
+        verification_summary: {
+          type: 'string',
+          description: 'What was done and verified — used as completion_summary on the task'
+        }
+      },
+      required: ['project_name', 'task_id', 'verification_summary']
+    }
   }
 ];
 
@@ -1341,6 +1418,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return withUpdateNotice(await handleSaveInvestigation(args));
     case 'generate_handoff_brief':
       return withUpdateNotice(await handleGenerateHandoffBrief(args));
+    case 'get_next_task':
+      return withUpdateNotice(await handleGetNextTask(args));
+    case 'complete_task':
+      return withUpdateNotice(await handleCompleteTask(args));
     default:
       return {
         content: [{
