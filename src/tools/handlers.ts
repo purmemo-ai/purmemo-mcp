@@ -1911,6 +1911,55 @@ export async function handleGetAcknowledgedErrors(args) {
   }
 }
 
+export async function handleSaveTestResult(args) {
+  try {
+    const projectName = (args.project_name || '').trim();
+    const testSuite = (args.test_suite || '').trim();
+
+    if (!projectName || !testSuite) {
+      return {
+        content: [{ type: 'text', text: '❌ Missing required fields: project_name and test_suite' }]
+      };
+    }
+    if (typeof args.passed !== 'boolean') {
+      return {
+        content: [{ type: 'text', text: '❌ Missing required field: passed (must be true or false)' }]
+      };
+    }
+
+    const response = await makeApiCall(
+      `/api/v1/projects/${encodeURIComponent(projectName)}/test_results`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          passed: args.passed,
+          test_suite: testSuite,
+          ...(args.failure_details ? { failure_details: args.failure_details } : {})
+        })
+      }
+    );
+
+    const statusEmoji = args.passed ? '✅' : '❌';
+    const lines = [
+      `${statusEmoji} Test Result Saved — ${testSuite}`,
+      ``,
+      `Status: ${response.status}`,
+      `Project: ${response.project_name}`,
+      `Memory ID: ${response.memory_id}`,
+      response.linked_task
+        ? `Linked Task: #${response.linked_task.sequence} — ${response.linked_task.title}`
+        : `Linked Task: none (no active task for this project)`,
+    ].join('\n');
+
+    return { content: [{ type: 'text', text: lines }] };
+
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `❌ Error saving test result: ${error.message}` }]
+    };
+  }
+}
+
 export async function handleGetNextTask(args) {
   try {
     const projectName = (args.project_name || '').trim();

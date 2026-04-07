@@ -82,6 +82,7 @@ import {
   handleReportMemory,
   handleGetAcknowledgedErrors,
   handleSaveInvestigation,
+  handleSaveTestResult,
   handleGetNextTask,
   handleCompleteTask
 } from './tools/handlers.js';
@@ -1131,6 +1132,52 @@ No new data is generated — composes from your existing V2 intelligence extract
     }
   },
   {
+    name: 'save_test_result',
+    annotations: {
+      title: 'Save Test Result',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    },
+    description: `Save a test result memory for a project, linked to the current active task.
+
+Call this after running tests — pass or fail — to record the outcome.
+Saves a memory with category='test_result' and links it to the most recent active task.
+Re-running with the same test_suite name updates the existing memory (living document).
+
+USAGE:
+- After a passing test run: save_test_result({ project_name, passed: true, test_suite })
+- After a failing run: save_test_result({ ..., passed: false, failure_details: "..." })
+
+RETURNS:
+- memory_id — UUID of the saved test result memory
+- status — "PASSED" or "FAILED"
+- linked_task — the active task this result is associated with (if any)`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_name: {
+          type: 'string',
+          description: 'The project name (e.g. "purmemo")'
+        },
+        passed: {
+          type: 'boolean',
+          description: 'Whether the test suite passed'
+        },
+        test_suite: {
+          type: 'string',
+          description: 'Name of the test suite (e.g. "get_next_task e2e")'
+        },
+        failure_details: {
+          type: 'string',
+          description: 'Details about what failed — only include when passed=false'
+        }
+      },
+      required: ['project_name', 'passed', 'test_suite']
+    }
+  },
+  {
     name: 'get_next_task',
     annotations: {
       title: 'Get Next Task',
@@ -1418,6 +1465,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return withUpdateNotice(await handleSaveInvestigation(args));
     case 'generate_handoff_brief':
       return withUpdateNotice(await handleGenerateHandoffBrief(args));
+    case 'save_test_result':
+      return withUpdateNotice(await handleSaveTestResult(args));
     case 'get_next_task':
       return withUpdateNotice(await handleGetNextTask(args));
     case 'complete_task':
