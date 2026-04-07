@@ -462,8 +462,14 @@ export async function handleSaveConversation(args) {
     }
 
     // Peek at next pending task for this project (read-only, no mutation)
+    // Priority: explicit project_name arg > title prefix (e.g. "Purmemo - ...") > intelligentContext
     let nextTaskHint = null;
-    const inferredProject = (intelligentContext.project_name || '').trim();
+    const inferredProject = (
+      args.project_name ||
+      intelligentContext.project_name ||
+      (title && title.split(/[\s\-–—]+/)[0].toLowerCase()) ||
+      ''
+    ).trim().toLowerCase();
     if (inferredProject) {
       try {
         const peekResp = await makeApiCall(`/api/v1/projects/${encodeURIComponent(inferredProject)}/pending_task`);
