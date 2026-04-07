@@ -564,6 +564,170 @@ class PurmemoAPI {
         )
     }
 
+    // MARK: - Claude Channel (v2/v3)
+
+    func getClaudeChannelMessages(limit: Int = 50) async throws -> [ClaudeChannelMessage] {
+        let token = try await authService.validToken()
+        let url = URL(string: "\(baseURL)/api/v1/claude-channel/messages?limit=\(limit)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await perform(request)
+        if let http = response as? HTTPURLResponse, http.statusCode == 401 {
+            let newToken = try await authService.refreshToken()
+            request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
+            let (retryData, _) = try await perform(request)
+            return Self.parseCCMessages(retryData)
+        }
+        return Self.parseCCMessages(data)
+    }
+
+    func sendClaudeChannelMessage(content: String, projectName: String? = nil, targetSessionId: String? = nil) async throws -> ClaudeChannelMessage {
+        let token = try await authService.validToken()
+        let url = URL(string: "\(baseURL)/api/v1/claude-channel/messages")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        var body: [String: Any] = ["content": content]
+        if let proj = projectName { body["project_name"] = proj }
+        if let target = targetSessionId { body["target_session_id"] = target }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await perform(request)
+        if let http = response as? HTTPURLResponse, http.statusCode == 401 {
+            let newToken = try await authService.refreshToken()
+            request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
+            let (retryData, _) = try await perform(request)
+            return try Self.parseSingleCCMessage(retryData)
+        }
+        return try Self.parseSingleCCMessage(data)
+    }
+
+    func deleteClaudeChannelMessage(id: String) async throws {
+        let token = try await authService.validToken()
+        let url = URL(string: "\(baseURL)/api/v1/claude-channel/messages/\(id)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (_, response) = try await perform(request)
+        if let http = response as? HTTPURLResponse, http.statusCode == 401 {
+            let newToken = try await authService.refreshToken()
+            request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
+            _ = try await perform(request)
+        }
+    }
+
+    // MARK: - Claude Channel Sessions (v3)
+
+    func getClaudeProjects() async throws -> [ClaudeProject] {
+        let token = try await authService.validToken()
+        let url = URL(string: "\(baseURL)/api/v1/claude-channel/projects")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await perform(request)
+        if let http = response as? HTTPURLResponse, http.statusCode == 401 {
+            let newToken = try await authService.refreshToken()
+            request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
+            let (retryData, _) = try await perform(request)
+            return Self.parseProjects(retryData)
+        }
+        return Self.parseProjects(data)
+    }
+
+    func getSessionMessages(sessionId: String, limit: Int = 50, offset: Int = 0) async throws -> [ClaudeChannelMessage] {
+        let token = try await authService.validToken()
+        let url = URL(string: "\(baseURL)/api/v1/claude-channel/sessions/\(sessionId)/messages?limit=\(limit)&offset=\(offset)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await perform(request)
+        if let http = response as? HTTPURLResponse, http.statusCode == 401 {
+            let newToken = try await authService.refreshToken()
+            request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
+            let (retryData, _) = try await perform(request)
+            return Self.parseCCMessages(retryData)
+        }
+        return Self.parseCCMessages(data)
+    }
+
+    // MARK: - Claude Channel Parsers
+
+    private static func parseCCMessages(_ data: Data) -> [ClaudeChannelMessage] {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let items = json["messages"] as? [[String: Any]] else { return [] }
+        return items.compactMap { parseCCMessageDict($0) }
+    }
+
+    private static func parseSingleCCMessage(_ data: Data) throws -> ClaudeChannelMessage {
+        guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let msg = parseCCMessageDict(dict) else { throw APIError.decodingError }
+        return msg
+    }
+
+    static func parseCCMessageDict(_ m: [String: Any]) -> ClaudeChannelMessage? {
+        guard let id = m["id"] as? String,
+              let content = m["content"] as? String else { return nil }
+        return ClaudeChannelMessage(
+            id: id,
+            content: content,
+            contentPreview: m["contentPreview"] as? String ?? m["content_preview"] as? String,
+            direction: m["direction"] as? String ?? "inbound",
+            parentMessageId: m["parentMessageId"] as? String ?? m["parent_message_id"] as? String,
+            projectName: m["projectName"] as? String ?? m["project_name"] as? String,
+            sessionId: m["sessionId"] as? String ?? m["session_id"] as? String,
+            targetSessionId: m["targetSessionId"] as? String ?? m["target_session_id"] as? String,
+            createdAt: m["createdAt"] as? String ?? m["created_at"] as? String,
+            updatedAt: m["updatedAt"] as? String ?? m["updated_at"] as? String
+        )
+    }
+
+    private static func parseProjects(_ data: Data) -> [ClaudeProject] {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let items = json["projects"] as? [[String: Any]] else { return [] }
+        return items.compactMap { parseProjectDict($0) }
+    }
+
+    private static func parseProjectDict(_ p: [String: Any]) -> ClaudeProject? {
+        guard let projectName = p["projectName"] as? String ?? p["project_name"] as? String,
+              let sessionId = p["sessionId"] as? String ?? p["session_id"] as? String else { return nil }
+
+        var lastMessage: ClaudeChannelMessage? = nil
+        if let lm = p["lastMessage"] as? [String: Any], let _ = lm["contentPreview"] as? String ?? lm["content_preview"] as? String {
+            lastMessage = ClaudeChannelMessage(
+                id: "",
+                content: lm["contentPreview"] as? String ?? lm["content_preview"] as? String ?? "",
+                contentPreview: lm["contentPreview"] as? String ?? lm["content_preview"] as? String,
+                direction: lm["direction"] as? String ?? "outbound",
+                parentMessageId: nil,
+                projectName: nil,
+                sessionId: nil,
+                targetSessionId: nil,
+                createdAt: lm["createdAt"] as? String ?? lm["created_at"] as? String,
+                updatedAt: nil
+            )
+        }
+
+        return ClaudeProject(
+            projectName: projectName,
+            sessionId: sessionId,
+            model: p["model"] as? String,
+            cwd: p["cwd"] as? String,
+            status: p["status"] as? String ?? "active",
+            lastHeartbeatAt: p["lastHeartbeatAt"] as? String ?? p["last_heartbeat_at"] as? String,
+            activeSessionCount: p["activeSessionCount"] as? Int ?? p["active_session_count"] as? Int ?? 0,
+            totalSessionCount: p["totalSessionCount"] as? Int ?? p["total_session_count"] as? Int ?? 0,
+            lastMessage: lastMessage,
+            unreadCount: p["unreadCount"] as? Int ?? p["unread_count"] as? Int ?? 0
+        )
+    }
+
     // MARK: - Todo Suggestions
 
     func getTodoSuggestions() async throws -> [TodoSuggestion] {

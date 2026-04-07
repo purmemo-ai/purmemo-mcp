@@ -1,6 +1,13 @@
 import SwiftUI
 import Combine
 
+// Shared state so PurmemoApp can react to flip (tab bar icon morph)
+@Observable
+class ThinkingViewState {
+    var isFlipped = false
+    static let shared = ThinkingViewState()
+}
+
 struct ThinkingView: View {
     var authService: AuthService
     @State private var todos: [TodoItem] = []
@@ -14,13 +21,27 @@ struct ThinkingView: View {
     @State private var voiceService = VoiceService()
     @State private var isRecording = false
 
+    // Page state (0 = Thinking, 1 = Claude)
+    @State private var selectedPage = 0
+
+    // Claude Channel data (v2: proper messages, not todos)
+    @State private var claudeMessages: [ClaudeChannelMessage] = []
+    @State private var claudeLoading = false
+    @State private var claudeStream: ClaudeChannelStream?
+
     private let placeholders = [
         "Add a todo...",
         "Record a voice note...",
         "Plan your Claude Code session..."
     ]
 
+    private var isFlipped: Bool { selectedPage == 1 }
     private var activeTodos: [TodoItem] { todos.filter { !$0.isDone } }
+    private var pendingClaudeMessages: [ClaudeChannelMessage] {
+        // Inbound messages without a linked outbound reply
+        let outboundParentIds = Set(claudeMessages.filter { $0.isOutbound }.compactMap { $0.parentMessageId })
+        return claudeMessages.filter { $0.isInbound && !outboundParentIds.contains($0.id) }
+    }
 
     var body: some View {
         ZStack {
@@ -28,14 +49,18 @@ struct ThinkingView: View {
 
             VStack(spacing: 0) {
                 header
-                todoContent
+                flippableContent
             }
             .safeAreaInset(edge: .bottom) {
                 addBar
             }
         }
         .preferredColorScheme(.dark)
-        .task { await loadTodos() }
+        .task {
+            await loadTodos()
+            await loadClaudeMessages()
+            startClaudeStream()
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView(authService: authService)
         }
@@ -51,18 +76,35 @@ struct ThinkingView: View {
                     .aspectRatio(contentMode: .fit)
                     .frame(height: 34)
                 HStack(spacing: 6) {
-                    Text("Thinking")
+                    Text(isFlipped ? "Claude" : "Thinking")
                         .font(.system(size: 12))
                         .foregroundColor(.white.opacity(0.4))
-                    if !activeTodos.isEmpty {
-                        Text("\(activeTodos.count)")
+                        .contentTransition(.numericText())
+                        .animation(.easeInOut(duration: 0.3), value: isFlipped)
+
+                    let count = isFlipped ? pendingClaudeMessages.count : activeTodos.count
+                    if count > 0 {
+                        Text("\(count)")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundColor(.black)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
                             .background(Color(hex: "#E7FC44"))
                             .clipShape(Capsule())
+                            .animation(.easeInOut(duration: 0.3), value: isFlipped)
                     }
+
+                    // Page dots
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(isFlipped ? Color.white.opacity(0.15) : Color.white.opacity(0.5))
+                            .frame(width: 5, height: 5)
+                        Circle()
+                            .fill(isFlipped ? Color(hex: "#E7FC44").opacity(0.8) : Color.white.opacity(0.15))
+                            .frame(width: 5, height: 5)
+                    }
+                    .padding(.leading, 4)
+                    .animation(.easeInOut(duration: 0.3), value: isFlipped)
                 }
             }
             Spacer()
@@ -83,7 +125,46 @@ struct ThinkingView: View {
         )
     }
 
-    // MARK: - Content
+    // MARK: - Paged Content
+
+    private var flippableContent: some View {
+        TabView(selection: $selectedPage) {
+            todoContent
+                .tag(0)
+
+            NavigationStack {
+                ClaudeSessionListView(
+                    authService: authService,
+                    stream: claudeStream,
+                    claudeMessages: $claudeMessages,
+                    onSendBroadcast: { text in
+                        Task {
+                            let api = PurmemoAPI(authService: authService)
+                            if let msg = try? await api.sendClaudeChannelMessage(content: text) {
+                                withAnimation { claudeMessages.insert(msg, at: 0) }
+                            }
+                        }
+                    },
+                    onDeleteMessage: { id in
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            claudeMessages.removeAll { $0.id == id }
+                        }
+                    }
+                )
+            }
+            .tag(1)
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .onChange(of: selectedPage) { _, newValue in
+            ThinkingViewState.shared.isFlipped = newValue == 1
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+        .onDisappear { stopClaudeStream() }
+    }
+
+    // MARK: - Claude Channel (v3: session list handles rendering)
+
+    // MARK: - Todo Content (front face, unchanged)
 
     private var todoContent: some View {
         Group {
@@ -301,6 +382,9 @@ struct ThinkingView: View {
                     Label("Mark Urgent", systemImage: "exclamationmark.triangle")
                 }
             }
+            Button { Task { await sendToClaude(todo) } } label: {
+                Label("Send to Claude", systemImage: "paperplane")
+            }
             Divider()
             Button(role: .destructive) { Task { await delete(todo) } } label: {
                 Label("Delete", systemImage: "trash")
@@ -408,13 +492,15 @@ struct ThinkingView: View {
         HStack(spacing: 10) {
             ZStack(alignment: .leading) {
                 if newTodoText.isEmpty {
-                    Text(placeholders[placeholderIndex])
+                    let currentPlaceholder = isFlipped ? "Message Claude..." : placeholders[placeholderIndex]
+                    Text(currentPlaceholder)
                         .font(.system(size: 15))
-                        .foregroundColor(.white.opacity(0.3))
+                        .foregroundColor(isFlipped ? Color(hex: "#E7FC44").opacity(0.4) : .white.opacity(0.3))
                         .padding(.leading, 14)
+                        .animation(.easeInOut(duration: 0.3), value: isFlipped)
                         .animation(.easeInOut(duration: 0.3), value: placeholderIndex)
                         .transition(.opacity)
-                        .id(placeholderIndex)
+                        .id(isFlipped ? "claude" : "thinking-\(placeholderIndex)")
                 }
                 TextField("", text: $newTodoText)
                     .font(.system(size: 15))
@@ -424,8 +510,13 @@ struct ThinkingView: View {
             }
             .background(Color(hex: "#1a1a1a"))
             .clipShape(RoundedRectangle(cornerRadius: 20))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(isFlipped ? Color(hex: "#E7FC44").opacity(0.15) : Color.clear, lineWidth: 1)
+            )
+            .animation(.easeInOut(duration: 0.3), value: isFlipped)
             .onReceive(Timer.publish(every: 3, on: .main, in: .common).autoconnect()) { _ in
-                if newTodoText.isEmpty {
+                if newTodoText.isEmpty && !isFlipped {
                     withAnimation(.easeInOut(duration: 0.3)) {
                         placeholderIndex = (placeholderIndex + 1) % placeholders.count
                     }
@@ -434,7 +525,7 @@ struct ThinkingView: View {
 
             if !newTodoText.trimmingCharacters(in: .whitespaces).isEmpty {
                 Button { addTodo() } label: {
-                    Image(systemName: "plus.circle.fill")
+                    Image(systemName: isFlipped ? "paperplane.circle.fill" : "plus.circle.fill")
                         .font(.system(size: 28))
                         .foregroundColor(Color(hex: "#E7FC44"))
                 }
@@ -530,6 +621,15 @@ struct ThinkingView: View {
         isLoading = false
     }
 
+    private func loadClaudeMessages() async {
+        claudeLoading = claudeMessages.isEmpty
+        let api = PurmemoAPI(authService: authService)
+        do {
+            claudeMessages = try await api.getClaudeChannelMessages()
+        } catch {}
+        claudeLoading = false
+    }
+
     private func addTodo() {
         if isRecording { stopRecording() }
         let text = newTodoText.trimmingCharacters(in: .whitespaces)
@@ -538,10 +638,42 @@ struct ThinkingView: View {
         Task {
             let api = PurmemoAPI(authService: authService)
             do {
-                let todo = try await api.createTodo(text: text)
-                withAnimation { todos.insert(todo, at: 0) }
+                if isFlipped {
+                    // Claude Channel: broadcast message (no target session)
+                    let message = try await api.sendClaudeChannelMessage(content: text)
+                    withAnimation {
+                        claudeMessages.insert(message, at: 0)
+                    }
+                } else {
+                    // Thinking pad: use todos API
+                    let todo = try await api.createTodo(text: text)
+                    withAnimation {
+                        todos.insert(todo, at: 0)
+                    }
+                }
             } catch {}
         }
+    }
+
+    private func sendToClaude(_ todo: TodoItem) async {
+        let api = PurmemoAPI(authService: authService)
+        do {
+            let message = try await api.sendClaudeChannelMessage(content: todo.text)
+            withAnimation {
+                claudeMessages.insert(message, at: 0)
+            }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } catch {}
+    }
+
+    private func deleteClaudeMessage(_ message: ClaudeChannelMessage) async {
+        let api = PurmemoAPI(authService: authService)
+        do {
+            try await api.deleteClaudeChannelMessage(id: message.id)
+            if let idx = claudeMessages.firstIndex(where: { $0.id == message.id }) {
+                withAnimation { claudeMessages.remove(at: idx) }
+            }
+        } catch {}
     }
 
     private func toggleDone(_ todo: TodoItem) async {
@@ -635,5 +767,44 @@ struct ThinkingView: View {
             try await api.resolveSuggestion(id: suggestion.id, accept: false)
             withAnimation { suggestions.removeAll { $0.id == suggestion.id } }
         } catch {}
+    }
+
+    // MARK: - Claude Channel SSE Stream
+
+    private func startClaudeStream() {
+        stopClaudeStream()
+
+        let stream = ClaudeChannelStream(authService: authService)
+
+        stream.onMessagesLoaded = { messages in
+            claudeLoading = false
+            withAnimation(.easeInOut(duration: 0.2)) {
+                claudeMessages = messages
+            }
+        }
+
+        stream.onMessageReceived = { message in
+            withAnimation(.easeInOut(duration: 0.2)) {
+                if let idx = claudeMessages.firstIndex(where: { $0.id == message.id }) {
+                    claudeMessages[idx] = message
+                } else {
+                    claudeMessages.insert(message, at: 0)
+                }
+            }
+        }
+
+        stream.onMessageDeleted = { id in
+            withAnimation(.easeInOut(duration: 0.2)) {
+                claudeMessages.removeAll { $0.id == id }
+            }
+        }
+
+        claudeStream = stream
+        stream.connect()
+    }
+
+    private func stopClaudeStream() {
+        claudeStream?.disconnect()
+        claudeStream = nil
     }
 }

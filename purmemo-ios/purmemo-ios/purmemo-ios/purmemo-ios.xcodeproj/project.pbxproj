@@ -7,47 +7,50 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		AA000001MSGS0000000000021 /* PurmemoMessages.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = AA000001MSGS0000000000011 /* PurmemoMessages.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		AA000001SHARE000000000021 /* PurmemoShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = AA000001SHARE000000000011 /* PurmemoShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		BB000001SCRN0000000000001 /* ScreenshotManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000001SCRN0000000000011 /* ScreenshotManager.swift */; };
-		BB000001SCRN0000000000002 /* SaveScreenshotIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000001SCRN0000000000012 /* SaveScreenshotIntent.swift */; };
-		BB000001SCRN0000000000003 /* AppShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000001SCRN0000000000013 /* AppShortcuts.swift */; };
-		BB000001SCRN0000000000004 /* ScreenshotCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000001SCRN0000000000014 /* ScreenshotCaptureView.swift */; };
+		3A7E42C2A66301CFB4EABDA9 /* ClaudeChannelStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B44FD892788DCF9D5D9185 /* ClaudeChannelStream.swift */; };
+		54F445D3A0EDE29D4A834D5F /* ClaudeSessionChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0AA4C6E91C4F2EAEABC5E2C /* ClaudeSessionChatView.swift */; };
+		5F9545E6B80C8BD6DD14C92A /* ClaudeSessionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FEE45F7B9C5F0F89ED04054 /* ClaudeSessionListView.swift */; };
+		'AA000001MSGS0000000000021' = {isa = PBXBuildFile; fileRef = AA000001MSGS0000000000011; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		'AA000001SHARE000000000021' = {isa = PBXBuildFile; fileRef = AA000001SHARE000000000011; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		'BB000001SCRN0000000000001' = {isa = PBXBuildFile; fileRef = BB000001SCRN0000000000011; };
+		'BB000001SCRN0000000000002' = {isa = PBXBuildFile; fileRef = BB000001SCRN0000000000012; };
+		'BB000001SCRN0000000000003' = {isa = PBXBuildFile; fileRef = BB000001SCRN0000000000013; };
+		'BB000001SCRN0000000000004' = {isa = PBXBuildFile; fileRef = BB000001SCRN0000000000014; };
+		'CC000001IMGP0000000000001' = {isa = PBXBuildFile; fileRef = CC000001IMGP0000000000002; };
+		'DD000001SETT000000000001' = {isa = PBXBuildFile; fileRef = DD000001SETT000000000002; };
 		E3201C662F64AB4500F9DCFA /* PurmemoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3201C5A2F64AB4500F9DCFA /* PurmemoApp.swift */; };
 		E3201C672F64AB4500F9DCFA /* MessageBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3201C642F64AB4500F9DCFA /* MessageBubble.swift */; };
 		E3201C682F64AB4500F9DCFA /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3201C632F64AB4500F9DCFA /* LoginView.swift */; };
 		E3201C692F64AB4500F9DCFA /* Memory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3201C572F64AB4500F9DCFA /* Memory.swift */; };
 		E3201C6A2F64AB4500F9DCFA /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3201C612F64AB4500F9DCFA /* ChatView.swift */; };
-		CC000001IMGP0000000000001 /* ImagePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000001IMGP0000000000002 /* ImagePickerView.swift */; };
 		E3201C6B2F64AB4500F9DCFA /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3201C5B2F64AB4500F9DCFA /* AuthService.swift */; };
 		E3201C6C2F64AB4500F9DCFA /* PurmemoAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3201C5D2F64AB4500F9DCFA /* PurmemoAPI.swift */; };
 		E3201C6D2F64AB4500F9DCFA /* ComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3201C622F64AB4500F9DCFA /* ComposerView.swift */; };
 		E3201C6E2F64AB4500F9DCFA /* Message.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3201C582F64AB4500F9DCFA /* Message.swift */; };
 		E3201C6F2F64AB4500F9DCFA /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3201C5F2F64AB4500F9DCFA /* ChatViewModel.swift */; };
 		E3201C702F64AB4500F9DCFA /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3201C5C2F64AB4500F9DCFA /* KeychainService.swift */; };
-		DD000001SETT000000000001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000001SETT000000000002 /* SettingsView.swift */; };
-		EE000001MEMD000000000001 /* MemoryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE000001MEMD000000000002 /* MemoryDetailView.swift */; };
-		EE000001RCLL000000000001 /* RecallResultBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE000001RCLL000000000002 /* RecallResultBubble.swift */; };
-		FF000001PROJ000000000001 /* ProjectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000001PROJ000000000002 /* ProjectsView.swift */; };
-		FF000002MDIA000000000001 /* MediaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000002MDIA000000000002 /* MediaView.swift */; };
-		FF000003MDTL000000000001 /* MediaDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000003MDTL000000000002 /* MediaDetailView.swift */; };
-		FF000004RLDR000000000001 /* RingLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000004RLDR000000000002 /* RingLoader.swift */; };
-		FF000005THNK000000000001 /* ThinkingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000005THNK000000000002 /* ThinkingView.swift */; };
-		FF000006PJDT000000000001 /* ProjectDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000006PJDT000000000002 /* ProjectDetailView.swift */; };
-		FF000007BPKL000000000001 /* BubblePackingLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000007BPKL000000000002 /* BubblePackingLayout.swift */; };
-		FF000008GLBV000000000001 /* GlassBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000008GLBV000000000002 /* GlassBubbleView.swift */; };
-		FF000009BGRD000000000001 /* BubbleGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000009BGRD000000000002 /* BubbleGridView.swift */; };
+		'EE000001MEMD000000000001' = {isa = PBXBuildFile; fileRef = EE000001MEMD000000000002; };
+		'EE000001RCLL000000000001' = {isa = PBXBuildFile; fileRef = EE000001RCLL000000000002; };
+		'FF000001PROJ000000000001' = {isa = PBXBuildFile; fileRef = FF000001PROJ000000000002; };
+		'FF000002MDIA000000000001' = {isa = PBXBuildFile; fileRef = FF000002MDIA000000000002; };
+		'FF000003MDTL000000000001' = {isa = PBXBuildFile; fileRef = FF000003MDTL000000000002; };
+		'FF000004RLDR000000000001' = {isa = PBXBuildFile; fileRef = FF000004RLDR000000000002; };
+		'FF000005THNK000000000001' = {isa = PBXBuildFile; fileRef = FF000005THNK000000000002; };
+		'FF000006PJDT000000000001' = {isa = PBXBuildFile; fileRef = FF000006PJDT000000000002; };
+		'FF000007BPKL000000000001' = {isa = PBXBuildFile; fileRef = FF000007BPKL000000000002; };
+		'FF000008GLBV000000000001' = {isa = PBXBuildFile; fileRef = FF000008GLBV000000000002; };
+		'FF000009BGRD000000000001' = {isa = PBXBuildFile; fileRef = FF000009BGRD000000000002; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		AA000001MSGS0000000000001 /* PBXContainerItemProxy */ = {
+		'AA000001MSGS0000000000001' = {
 			isa = PBXContainerItemProxy;
 			containerPortal = E3201C0B2F648F8F00F9DCFA /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = AA000001MSGS0000000000010;
 			remoteInfo = PurmemoMessages;
 		};
-		AA000001SHARE000000000001 /* PBXContainerItemProxy */ = {
+		'AA000001SHARE000000000001' = {
 			isa = PBXContainerItemProxy;
 			containerPortal = E3201C0B2F648F8F00F9DCFA /* Project object */;
 			proxyType = 1;
@@ -71,14 +74,13 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		AA000001SHARE000000000020 /* Embed Foundation Extensions */ = {
+		'AA000001SHARE000000000020' = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				AA000001SHARE000000000021 /* PurmemoShare.appex in Embed Foundation Extensions */,
-				AA000001MSGS0000000000021 /* PurmemoMessages.appex in Embed Foundation Extensions */,
+				AA000001SHARE000000000021,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -86,12 +88,16 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		AA000001MSGS0000000000011 /* PurmemoMessages.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PurmemoMessages.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		AA000001SHARE000000000011 /* PurmemoShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PurmemoShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		BB000001SCRN0000000000011 /* ScreenshotManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotManager.swift; sourceTree = "<group>"; };
-		BB000001SCRN0000000000012 /* SaveScreenshotIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaveScreenshotIntent.swift; sourceTree = "<group>"; };
-		BB000001SCRN0000000000013 /* AppShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcuts.swift; sourceTree = "<group>"; };
-		BB000001SCRN0000000000014 /* ScreenshotCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotCaptureView.swift; sourceTree = "<group>"; };
+		8FEE45F7B9C5F0F89ED04054 /* ClaudeSessionListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ClaudeSessionListView.swift; path = Views/ClaudeSessionListView.swift; sourceTree = SOURCE_ROOT; };
+		'AA000001MSGS0000000000011' = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PurmemoMessages.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		'AA000001SHARE000000000011' = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PurmemoShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		'BB000001SCRN0000000000011' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotManager.swift; sourceTree = "<group>"; };
+		'BB000001SCRN0000000000012' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaveScreenshotIntent.swift; sourceTree = "<group>"; };
+		'BB000001SCRN0000000000013' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcuts.swift; sourceTree = "<group>"; };
+		'BB000001SCRN0000000000014' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotCaptureView.swift; sourceTree = "<group>"; };
+		'CC000001IMGP0000000000002' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePickerView.swift; sourceTree = "<group>"; };
+		D0B44FD892788DCF9D5D9185 /* ClaudeChannelStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ClaudeChannelStream.swift; path = Services/ClaudeChannelStream.swift; sourceTree = SOURCE_ROOT; };
+		'DD000001SETT000000000002' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		E3201C132F648F8F00F9DCFA /* purmemo-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "purmemo-ios.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		E3201C202F648F9000F9DCFA /* purmemo-iosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "purmemo-iosTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		E3201C2A2F648F9000F9DCFA /* purmemo-iosUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "purmemo-iosUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -106,81 +112,54 @@
 		E3201C622F64AB4500F9DCFA /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
 		E3201C632F64AB4500F9DCFA /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		E3201C642F64AB4500F9DCFA /* MessageBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubble.swift; sourceTree = "<group>"; };
-		CC000001IMGP0000000000002 /* ImagePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePickerView.swift; sourceTree = "<group>"; };
-		DD000001SETT000000000002 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		EE000001MEMD000000000002 /* MemoryDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryDetailView.swift; sourceTree = "<group>"; };
-		EE000001RCLL000000000002 /* RecallResultBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecallResultBubble.swift; sourceTree = "<group>"; };
-		FF000001PROJ000000000002 /* ProjectsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsView.swift; sourceTree = "<group>"; };
-		FF000002MDIA000000000002 /* MediaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaView.swift; sourceTree = "<group>"; };
-		FF000003MDTL000000000002 /* MediaDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaDetailView.swift; sourceTree = "<group>"; };
-		FF000004RLDR000000000002 /* RingLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RingLoader.swift; sourceTree = "<group>"; };
-		FF000005THNK000000000002 /* ThinkingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingView.swift; sourceTree = "<group>"; };
-		FF000006PJDT000000000002 /* ProjectDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDetailView.swift; sourceTree = "<group>"; };
-		FF000007BPKL000000000002 /* BubblePackingLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubblePackingLayout.swift; sourceTree = "<group>"; };
-		FF000008GLBV000000000002 /* GlassBubbleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassBubbleView.swift; sourceTree = "<group>"; };
-		FF000009BGRD000000000002 /* BubbleGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleGridView.swift; sourceTree = "<group>"; };
+		'EE000001MEMD000000000002' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryDetailView.swift; sourceTree = "<group>"; };
+		'EE000001RCLL000000000002' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecallResultBubble.swift; sourceTree = "<group>"; };
+		F0AA4C6E91C4F2EAEABC5E2C /* ClaudeSessionChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ClaudeSessionChatView.swift; path = Views/ClaudeSessionChatView.swift; sourceTree = SOURCE_ROOT; };
+		'FF000001PROJ000000000002' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsView.swift; sourceTree = "<group>"; };
+		'FF000002MDIA000000000002' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaView.swift; sourceTree = "<group>"; };
+		'FF000003MDTL000000000002' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaDetailView.swift; sourceTree = "<group>"; };
+		'FF000004RLDR000000000002' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RingLoader.swift; sourceTree = "<group>"; };
+		'FF000005THNK000000000002' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingView.swift; sourceTree = "<group>"; };
+		'FF000006PJDT000000000002' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDetailView.swift; sourceTree = "<group>"; };
+		'FF000007BPKL000000000002' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubblePackingLayout.swift; sourceTree = "<group>"; };
+		'FF000008GLBV000000000002' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassBubbleView.swift; sourceTree = "<group>"; };
+		'FF000009BGRD000000000002' = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleGridView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		AA000001MSGS0000000000031 /* Exceptions for "PurmemoMessages" folder in "PurmemoMessages" target */ = {
+		'AA000001MSGS0000000000031' = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = AA000001MSGS0000000000010 /* PurmemoMessages */;
+			target = AA000001MSGS0000000000010;
 		};
-		AA000001SHARE000000000031 /* Exceptions for "PurmemoShare" folder in "PurmemoShare" target */ = {
+		'AA000001SHARE000000000031' = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = AA000001SHARE000000000010 /* PurmemoShare */;
+			target = AA000001SHARE000000000010;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		AA000001MSGS0000000000030 /* PurmemoMessages */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				AA000001MSGS0000000000031 /* Exceptions for "PurmemoMessages" folder in "PurmemoMessages" target */,
-			);
-			path = PurmemoMessages;
-			sourceTree = "<group>";
-		};
-		AA000001SHARE000000000030 /* PurmemoShare */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				AA000001SHARE000000000031 /* Exceptions for "PurmemoShare" folder in "PurmemoShare" target */,
-			);
-			path = PurmemoShare;
-			sourceTree = "<group>";
-		};
-		E3201C152F648F8F00F9DCFA /* purmemo-ios */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "purmemo-ios";
-			sourceTree = "<group>";
-		};
-		E3201C232F648F9000F9DCFA /* purmemo-iosTests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "purmemo-iosTests";
-			sourceTree = "<group>";
-		};
-		E3201C2D2F648F9000F9DCFA /* purmemo-iosUITests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "purmemo-iosUITests";
-			sourceTree = "<group>";
-		};
+		'AA000001MSGS0000000000030' = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (AA000001MSGS0000000000031, ); path = PurmemoMessages; sourceTree = "<group>"; };
+		'AA000001SHARE000000000030' = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (AA000001SHARE000000000031, ); path = PurmemoShare; sourceTree = "<group>"; };
+		E3201C152F648F8F00F9DCFA /* purmemo-ios */ = {isa = PBXFileSystemSynchronizedRootGroup; path = "purmemo-ios"; sourceTree = "<group>"; };
+		E3201C232F648F9000F9DCFA /* purmemo-iosTests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = "purmemo-iosTests"; sourceTree = "<group>"; };
+		E3201C2D2F648F9000F9DCFA /* purmemo-iosUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = "purmemo-iosUITests"; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		AA000001MSGS0000000000012 /* Frameworks */ = {
+		'AA000001MSGS0000000000012' = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		AA000001SHARE000000000012 /* Frameworks */ = {
+		'AA000001SHARE000000000012' = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -211,11 +190,11 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		BB000001SCRN0000000000020 /* Intents */ = {
+		'BB000001SCRN0000000000020' = {
 			isa = PBXGroup;
 			children = (
-				BB000001SCRN0000000000012 /* SaveScreenshotIntent.swift */,
-				BB000001SCRN0000000000013 /* AppShortcuts.swift */,
+				BB000001SCRN0000000000012,
+				BB000001SCRN0000000000013,
 			);
 			path = Intents;
 			sourceTree = "<group>";
@@ -224,8 +203,8 @@
 			isa = PBXGroup;
 			children = (
 				E3201C152F648F8F00F9DCFA /* purmemo-ios */,
-				AA000001SHARE000000000030 /* PurmemoShare */,
-				AA000001MSGS0000000000030 /* PurmemoMessages */,
+				AA000001SHARE000000000030,
+				AA000001MSGS0000000000030,
 				E3201C232F648F9000F9DCFA /* purmemo-iosTests */,
 				E3201C2D2F648F9000F9DCFA /* purmemo-iosUITests */,
 				E3201C142F648F8F00F9DCFA /* Products */,
@@ -234,7 +213,10 @@
 				E3201C5E2F64AB4500F9DCFA /* Services */,
 				E3201C602F64AB4500F9DCFA /* ViewModels */,
 				E3201C652F64AB4500F9DCFA /* Views */,
-				BB000001SCRN0000000000020 /* Intents */,
+				BB000001SCRN0000000000020,
+				F0AA4C6E91C4F2EAEABC5E2C /* ClaudeSessionChatView.swift */,
+				8FEE45F7B9C5F0F89ED04054 /* ClaudeSessionListView.swift */,
+				D0B44FD892788DCF9D5D9185 /* ClaudeChannelStream.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -244,8 +226,8 @@
 				E3201C132F648F8F00F9DCFA /* purmemo-ios.app */,
 				E3201C202F648F9000F9DCFA /* purmemo-iosTests.xctest */,
 				E3201C2A2F648F9000F9DCFA /* purmemo-iosUITests.xctest */,
-				AA000001SHARE000000000011 /* PurmemoShare.appex */,
-				AA000001MSGS0000000000011 /* PurmemoMessages.appex */,
+				AA000001SHARE000000000011,
+				AA000001MSGS0000000000011,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -265,7 +247,7 @@
 				E3201C5B2F64AB4500F9DCFA /* AuthService.swift */,
 				E3201C5C2F64AB4500F9DCFA /* KeychainService.swift */,
 				E3201C5D2F64AB4500F9DCFA /* PurmemoAPI.swift */,
-				BB000001SCRN0000000000011 /* ScreenshotManager.swift */,
+				BB000001SCRN0000000000011,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -285,20 +267,20 @@
 				E3201C622F64AB4500F9DCFA /* ComposerView.swift */,
 				E3201C632F64AB4500F9DCFA /* LoginView.swift */,
 				E3201C642F64AB4500F9DCFA /* MessageBubble.swift */,
-				BB000001SCRN0000000000014 /* ScreenshotCaptureView.swift */,
-				CC000001IMGP0000000000002 /* ImagePickerView.swift */,
-				DD000001SETT000000000002 /* SettingsView.swift */,
-				EE000001MEMD000000000002 /* MemoryDetailView.swift */,
-				EE000001RCLL000000000002 /* RecallResultBubble.swift */,
-				FF000001PROJ000000000002 /* ProjectsView.swift */,
-				FF000002MDIA000000000002 /* MediaView.swift */,
-				FF000003MDTL000000000002 /* MediaDetailView.swift */,
-				FF000004RLDR000000000002 /* RingLoader.swift */,
-				FF000005THNK000000000002 /* ThinkingView.swift */,
-				FF000006PJDT000000000002 /* ProjectDetailView.swift */,
-				FF000007BPKL000000000002 /* BubblePackingLayout.swift */,
-				FF000008GLBV000000000002 /* GlassBubbleView.swift */,
-				FF000009BGRD000000000002 /* BubbleGridView.swift */,
+				BB000001SCRN0000000000014,
+				CC000001IMGP0000000000002,
+				DD000001SETT000000000002,
+				EE000001MEMD000000000002,
+				EE000001RCLL000000000002,
+				FF000001PROJ000000000002,
+				FF000002MDIA000000000002,
+				FF000003MDTL000000000002,
+				FF000004RLDR000000000002,
+				FF000005THNK000000000002,
+				FF000006PJDT000000000002,
+				FF000007BPKL000000000002,
+				FF000008GLBV000000000002,
+				FF000009BGRD000000000002,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -306,48 +288,48 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		AA000001MSGS0000000000010 /* PurmemoMessages */ = {
+		'AA000001MSGS0000000000010' = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = AA000001MSGS0000000000040 /* Build configuration list for PBXNativeTarget "PurmemoMessages" */;
+			buildConfigurationList = AA000001MSGS0000000000040;
 			buildPhases = (
-				AA000001MSGS0000000000013 /* Sources */,
-				AA000001MSGS0000000000012 /* Frameworks */,
-				AA000001MSGS0000000000014 /* Resources */,
+				AA000001MSGS0000000000013,
+				AA000001MSGS0000000000012,
+				AA000001MSGS0000000000014,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				AA000001MSGS0000000000030 /* PurmemoMessages */,
+				AA000001MSGS0000000000030,
 			);
 			name = PurmemoMessages;
 			packageProductDependencies = (
 			);
 			productName = PurmemoMessages;
-			productReference = AA000001MSGS0000000000011 /* PurmemoMessages.appex */;
+			productReference = AA000001MSGS0000000000011;
 			productType = "com.apple.product-type.app-extension";
 		};
-		AA000001SHARE000000000010 /* PurmemoShare */ = {
+		'AA000001SHARE000000000010' = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = AA000001SHARE000000000040 /* Build configuration list for PBXNativeTarget "PurmemoShare" */;
+			buildConfigurationList = AA000001SHARE000000000040;
 			buildPhases = (
-				AA000001SHARE000000000013 /* Sources */,
-				AA000001SHARE000000000012 /* Frameworks */,
-				AA000001SHARE000000000014 /* Resources */,
+				AA000001SHARE000000000013,
+				AA000001SHARE000000000012,
+				AA000001SHARE000000000014,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				AA000001SHARE000000000030 /* PurmemoShare */,
+				AA000001SHARE000000000030,
 			);
 			name = PurmemoShare;
 			packageProductDependencies = (
 			);
 			productName = PurmemoShare;
-			productReference = AA000001SHARE000000000011 /* PurmemoShare.appex */;
+			productReference = AA000001SHARE000000000011;
 			productType = "com.apple.product-type.app-extension";
 		};
 		E3201C122F648F8F00F9DCFA /* purmemo-ios */ = {
@@ -357,13 +339,12 @@
 				E3201C0F2F648F8F00F9DCFA /* Sources */,
 				E3201C102F648F8F00F9DCFA /* Frameworks */,
 				E3201C112F648F8F00F9DCFA /* Resources */,
-				AA000001SHARE000000000020 /* Embed Foundation Extensions */,
+				AA000001SHARE000000000020,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				AA000001SHARE000000000002 /* PBXTargetDependency */,
-				AA000001MSGS0000000000002 /* PBXTargetDependency */,
+				AA000001SHARE000000000002,
 			);
 			fileSystemSynchronizedGroups = (
 				E3201C152F648F8F00F9DCFA /* purmemo-ios */,
@@ -465,8 +446,8 @@
 			projectRoot = "";
 			targets = (
 				E3201C122F648F8F00F9DCFA /* purmemo-ios */,
-				AA000001SHARE000000000010 /* PurmemoShare */,
-				AA000001MSGS0000000000010 /* PurmemoMessages */,
+				AA000001SHARE000000000010,
+				AA000001MSGS0000000000010,
 				E3201C1F2F648F9000F9DCFA /* purmemo-iosTests */,
 				E3201C292F648F9000F9DCFA /* purmemo-iosUITests */,
 			);
@@ -474,14 +455,14 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		AA000001MSGS0000000000014 /* Resources */ = {
+		'AA000001MSGS0000000000014' = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		AA000001SHARE000000000014 /* Resources */ = {
+		'AA000001SHARE000000000014' = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -512,14 +493,14 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		AA000001MSGS0000000000013 /* Sources */ = {
+		'AA000001MSGS0000000000013' = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		AA000001SHARE000000000013 /* Sources */ = {
+		'AA000001SHARE000000000013' = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -541,23 +522,26 @@
 				E3201C6E2F64AB4500F9DCFA /* Message.swift in Sources */,
 				E3201C6F2F64AB4500F9DCFA /* ChatViewModel.swift in Sources */,
 				E3201C702F64AB4500F9DCFA /* KeychainService.swift in Sources */,
-				CC000001IMGP0000000000001 /* ImagePickerView.swift in Sources */,
-				BB000001SCRN0000000000001 /* ScreenshotManager.swift in Sources */,
-				BB000001SCRN0000000000002 /* SaveScreenshotIntent.swift in Sources */,
-				BB000001SCRN0000000000003 /* AppShortcuts.swift in Sources */,
-				BB000001SCRN0000000000004 /* ScreenshotCaptureView.swift in Sources */,
-				DD000001SETT000000000001 /* SettingsView.swift in Sources */,
-				EE000001MEMD000000000001 /* MemoryDetailView.swift in Sources */,
-				EE000001RCLL000000000001 /* RecallResultBubble.swift in Sources */,
-				FF000001PROJ000000000001 /* ProjectsView.swift in Sources */,
-				FF000002MDIA000000000001 /* MediaView.swift in Sources */,
-				FF000003MDTL000000000001 /* MediaDetailView.swift in Sources */,
-				FF000004RLDR000000000001 /* RingLoader.swift in Sources */,
-				FF000005THNK000000000001 /* ThinkingView.swift in Sources */,
-				FF000006PJDT000000000001 /* ProjectDetailView.swift in Sources */,
-				FF000007BPKL000000000001 /* BubblePackingLayout.swift in Sources */,
-				FF000008GLBV000000000001 /* GlassBubbleView.swift in Sources */,
-				FF000009BGRD000000000001 /* BubbleGridView.swift in Sources */,
+				CC000001IMGP0000000000001,
+				BB000001SCRN0000000000001,
+				BB000001SCRN0000000000002,
+				BB000001SCRN0000000000003,
+				BB000001SCRN0000000000004,
+				DD000001SETT000000000001,
+				EE000001MEMD000000000001,
+				EE000001RCLL000000000001,
+				FF000001PROJ000000000001,
+				FF000002MDIA000000000001,
+				FF000003MDTL000000000001,
+				FF000004RLDR000000000001,
+				FF000005THNK000000000001,
+				FF000006PJDT000000000001,
+				FF000007BPKL000000000001,
+				FF000008GLBV000000000001,
+				FF000009BGRD000000000001,
+				54F445D3A0EDE29D4A834D5F /* ClaudeSessionChatView.swift in Sources */,
+				5F9545E6B80C8BD6DD14C92A /* ClaudeSessionListView.swift in Sources */,
+				3A7E42C2A66301CFB4EABDA9 /* ClaudeChannelStream.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -578,15 +562,15 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		AA000001MSGS0000000000002 /* PBXTargetDependency */ = {
+		'AA000001MSGS0000000000002' = {
 			isa = PBXTargetDependency;
-			target = AA000001MSGS0000000000010 /* PurmemoMessages */;
-			targetProxy = AA000001MSGS0000000000001 /* PBXContainerItemProxy */;
+			target = AA000001MSGS0000000000010;
+			targetProxy = AA000001MSGS0000000000001;
 		};
-		AA000001SHARE000000000002 /* PBXTargetDependency */ = {
+		'AA000001SHARE000000000002' = {
 			isa = PBXTargetDependency;
-			target = AA000001SHARE000000000010 /* PurmemoShare */;
-			targetProxy = AA000001SHARE000000000001 /* PBXContainerItemProxy */;
+			target = AA000001SHARE000000000010;
+			targetProxy = AA000001SHARE000000000001;
 		};
 		E3201C222F648F9000F9DCFA /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -601,10 +585,11 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		AA000001MSGS0000000000041 /* Debug */ = {
+		'AA000001MSGS0000000000041' = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_IMESSAGE_APP_ICON_NAME = "iMessage App Icon";
 				CODE_SIGN_ENTITLEMENTS = PurmemoMessages/PurmemoMessages.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -619,6 +604,10 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/Views",
+					"$(SRCROOT)/Services",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "ai.purmemo.purmemo-ios.PurmemoMessages";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -630,10 +619,11 @@
 			};
 			name = Debug;
 		};
-		AA000001MSGS0000000000042 /* Release */ = {
+		'AA000001MSGS0000000000042' = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_IMESSAGE_APP_ICON_NAME = "iMessage App Icon";
 				CODE_SIGN_ENTITLEMENTS = PurmemoMessages/PurmemoMessages.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -647,6 +637,10 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/Views",
+					"$(SRCROOT)/Services",
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "ai.purmemo.purmemo-ios.PurmemoMessages";
@@ -659,7 +653,7 @@
 			};
 			name = Release;
 		};
-		AA000001SHARE000000000041 /* Debug */ = {
+		'AA000001SHARE000000000041' = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = PurmemoShare/PurmemoShare.entitlements;
@@ -678,6 +672,10 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/Views",
+					"$(SRCROOT)/Services",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "ai.purmemo.purmemo-ios.PurmemoShare";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -689,7 +687,7 @@
 			};
 			name = Debug;
 		};
-		AA000001SHARE000000000042 /* Release */ = {
+		'AA000001SHARE000000000042' = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = PurmemoShare/PurmemoShare.entitlements;
@@ -707,6 +705,10 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/Views",
+					"$(SRCROOT)/Services",
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "ai.purmemo.purmemo-ios.PurmemoShare";
@@ -866,6 +868,10 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/Views",
+					"$(SRCROOT)/Services",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "ai.purmemo.purmemo-ios";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -903,6 +909,10 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/Views",
+					"$(SRCROOT)/Services",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "ai.purmemo.purmemo-ios";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -925,6 +935,10 @@
 				DEVELOPMENT_TEAM = DC7489SG7F;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/Views",
+					"$(SRCROOT)/Services",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "ai.purmemo.purmemo-iosTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -947,6 +961,10 @@
 				DEVELOPMENT_TEAM = DC7489SG7F;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/Views",
+					"$(SRCROOT)/Services",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "ai.purmemo.purmemo-iosTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -967,6 +985,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = DC7489SG7F;
 				GENERATE_INFOPLIST_FILE = YES;
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/Views",
+					"$(SRCROOT)/Services",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "ai.purmemo.purmemo-iosUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -987,6 +1009,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = DC7489SG7F;
 				GENERATE_INFOPLIST_FILE = YES;
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/Views",
+					"$(SRCROOT)/Services",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "ai.purmemo.purmemo-iosUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1003,20 +1029,20 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		AA000001MSGS0000000000040 /* Build configuration list for PBXNativeTarget "PurmemoMessages" */ = {
+		'AA000001MSGS0000000000040' = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				AA000001MSGS0000000000041 /* Debug */,
-				AA000001MSGS0000000000042 /* Release */,
+				AA000001MSGS0000000000041,
+				AA000001MSGS0000000000042,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		AA000001SHARE000000000040 /* Build configuration list for PBXNativeTarget "PurmemoShare" */ = {
+		'AA000001SHARE000000000040' = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				AA000001SHARE000000000041 /* Debug */,
-				AA000001SHARE000000000042 /* Release */,
+				AA000001SHARE000000000041,
+				AA000001SHARE000000000042,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

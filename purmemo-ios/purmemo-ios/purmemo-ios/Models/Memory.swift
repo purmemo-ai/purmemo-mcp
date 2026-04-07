@@ -296,3 +296,59 @@ struct MediaListResponse {
     let total: Int
     let hasMore: Bool
 }
+
+// MARK: - Claude Channel Message
+
+struct ClaudeChannelMessage: Identifiable {
+    let id: String
+    let content: String
+    let contentPreview: String?
+    let direction: String       // "inbound" | "outbound"
+    let parentMessageId: String?
+    let projectName: String?
+    let sessionId: String?
+    let targetSessionId: String?
+    let createdAt: String?
+    let updatedAt: String?
+
+    var isInbound: Bool { direction == "inbound" }
+    var isOutbound: Bool { direction == "outbound" }
+    var displayText: String { contentPreview ?? content }
+}
+
+// MARK: - Claude Channel Session (v3)
+
+struct ClaudeSession: Identifiable {
+    let id: String
+    let projectName: String
+    let model: String?
+    let cwd: String?
+    let status: String          // "active" | "idle" | "disconnected"
+    let lastHeartbeatAt: String?
+    let registeredAt: String?
+    let lastMessage: ClaudeChannelMessage?
+    let unreadCount: Int
+
+    var isActive: Bool { status == "active" }
+    var isIdle: Bool { status == "idle" }
+    var isDisconnected: Bool { status == "disconnected" }
+}
+
+// MARK: - Claude Channel Project (v3 — user-facing)
+
+struct ClaudeProject: Identifiable {
+    var id: String { projectName }
+    let projectName: String
+    let sessionId: String       // best active session for routing
+    let model: String?
+    let cwd: String?
+    let status: String          // status of best session
+    let lastHeartbeatAt: String?
+    let activeSessionCount: Int
+    let totalSessionCount: Int
+    let lastMessage: ClaudeChannelMessage?
+    let unreadCount: Int
+
+    var isActive: Bool { status == "active" }
+    var isIdle: Bool { status == "idle" }
+}

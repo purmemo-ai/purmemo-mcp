@@ -5,6 +5,12 @@
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
+    },
+    {
+      "filename" : "AppIcon-messages.png",
+      "idiom" : "universal",
+      "platform" : "messages",
+      "size" : "1024x768"
     }
   ],
   "info" : {

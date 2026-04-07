@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>MSMessagesExtensionStoreIconName</key>
-	<string>iMessage App Icon</string>
+	<string>AppIcon</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionPointIdentifier</key>
