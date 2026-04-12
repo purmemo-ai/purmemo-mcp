@@ -246,6 +246,17 @@ No re-explaining who you are. No repeating your stack. Just continue.
 | `get_public_memory` | Get the full content of a shared memory |
 | `report_memory` | Report inappropriate public content |
 
+### Tasks & Investigation
+
+| Tool | Description |
+|------|-------------|
+| `get_next_task` | Get the next pending task from your queue |
+| `complete_task` | Mark a task complete with optional notes |
+| `generate_handoff_brief` | Generate a handoff brief for the current session |
+| `save_test_result` | Save a test run result linked to a conversation |
+| `get_acknowledged_errors` | Fetch acknowledged production errors awaiting investigation |
+| `save_investigation_result` | Save error investigation results for audit trail |
+
 **`get_user_context` in action:**
 
 ```

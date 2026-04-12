@@ -6,7 +6,7 @@
     "url": "https://github.com/purmemo-ai/purmemo-mcp",
     "source": "github"
   },
-  "version": "15.2.8",
+  "version": "15.3.0",
   "icon": {
     "src": "https://purmemo.ai/favicon.png"
   },
@@ -46,13 +46,31 @@
     },
     {
       "name": "report_memory"
+    },
+    {
+      "name": "get_acknowledged_errors"
+    },
+    {
+      "name": "save_investigation_result"
+    },
+    {
+      "name": "generate_handoff_brief"
+    },
+    {
+      "name": "save_test_result"
+    },
+    {
+      "name": "get_next_task"
+    },
+    {
+      "name": "complete_task"
     }
   ],
   "packages": [
     {
       "registryType": "npm",
       "identifier": "purmemo-mcp",
-      "version": "15.2.8",
+      "version": "15.3.0",
       "runtimeHint": "node",
       "transport": {
         "type": "stdio"

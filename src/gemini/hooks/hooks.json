@@ -20,38 +20,6 @@
           }
         ]
       }
-    ],
-    "AfterTool": [
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${extensionPath}/scripts/purmemo_capture.js"
-          }
-        ]
-      }
-    ],
-    "PreCompress": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${extensionPath}/scripts/purmemo_capture.js"
-          }
-        ]
-      }
-    ],
-    "AfterAgent": [
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${extensionPath}/scripts/purmemo_capture.js"
-          }
-        ]
-      }
     ]
   }
 }

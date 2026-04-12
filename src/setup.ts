@@ -28,9 +28,12 @@ const tokenStore = new TokenStore();
 const HOOKS_DIR     = path.join(os.homedir(), '.claude', 'hooks');
 const COMMANDS_DIR  = path.join(os.homedir(), '.claude', 'commands');
 const SETTINGS_FILE = path.join(os.homedir(), '.claude', 'settings.json');
-const HOOK_SCRIPTS  = ['purmemo_lib.js', 'purmemo_recall.js', 'purmemo_capture.js', 'purmemo_first_message.js'];
+const HOOK_SCRIPTS  = ['purmemo_lib.js', 'purmemo_recall.js', 'purmemo_first_message.js'];
 const COMMAND_FILES = ['save.md', 'recall.md', 'context.md', 'purmemo.md'];
-const OLD_HOOK_SCRIPTS = ['purmemo_save.js', 'purmemo_heartbeat.js', 'purmemo_precompact.js', 'purmemo_session_start.js', 'hook-utils.js'];
+// purmemo_capture.js retired in v15.3.0 — AMP is the canonical capture path.
+// See purmemoAMP's SessionMemoryExtractor + LocalCaptureServer. Legacy files are
+// removed from existing installs by migrateRetireCapture() below.
+const OLD_HOOK_SCRIPTS = ['purmemo_save.js', 'purmemo_heartbeat.js', 'purmemo_precompact.js', 'purmemo_session_start.js', 'hook-utils.js', 'purmemo_capture.js'];
 
 const banner = `
 ╔═══════════════════════════════════════════╗
@@ -264,31 +267,58 @@ function hasOldHooks() {
 }
 
 function migrateOldHooks() {
-  // Remove old hook files
+  // Remove old hook files from Claude Code install
   for (const file of OLD_HOOK_SCRIPTS) {
     const p = path.join(HOOKS_DIR, file);
     try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch {}
   }
 
-  // Remove old hook entries from settings.json
+  // Remove old hook entries from Claude Code settings.json
   try {
-    if (!fs.existsSync(SETTINGS_FILE)) return;
-    const settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-    if (!settings.hooks) return;
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      if (settings.hooks) {
+        const oldNames = ['purmemo_session_start', 'purmemo_save', 'purmemo_heartbeat', 'purmemo_precompact', 'purmemo_capture'];
+        for (const eventKey of Object.keys(settings.hooks)) {
+          if (Array.isArray(settings.hooks[eventKey])) {
+            settings.hooks[eventKey] = settings.hooks[eventKey].filter(
+              (entry) => !entry.hooks?.some((h) => oldNames.some(n => h.command?.includes(n)))
+            );
+            if (settings.hooks[eventKey].length === 0) delete settings.hooks[eventKey];
+          }
+        }
+        const tmp = SETTINGS_FILE + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(settings, null, 2), 'utf8');
+        fs.renameSync(tmp, SETTINGS_FILE);
+      }
+    }
+  } catch {}
 
-    const oldNames = ['purmemo_session_start', 'purmemo_save', 'purmemo_heartbeat', 'purmemo_precompact'];
-    for (const eventKey of Object.keys(settings.hooks)) {
-      if (Array.isArray(settings.hooks[eventKey])) {
-        settings.hooks[eventKey] = settings.hooks[eventKey].filter(
-          (entry) => !entry.hooks?.some((h) => oldNames.some(n => h.command?.includes(n)))
-        );
-        if (settings.hooks[eventKey].length === 0) delete settings.hooks[eventKey];
+  // Retire purmemo_capture from Gemini CLI extension (v15.3.0+)
+  // AMP is the canonical capture path; this hook was creating mislabeled cloud memories.
+  try {
+    const geminiExtHooks = path.join(os.homedir(), '.purmemo', 'gemini-extension', 'hooks', 'hooks.json');
+    const geminiExtScripts = path.join(os.homedir(), '.purmemo', 'gemini-extension', 'scripts');
+    const geminiCaptureScript = path.join(geminiExtScripts, 'purmemo_capture.js');
+
+    if (fs.existsSync(geminiExtHooks)) {
+      const hooksData = JSON.parse(fs.readFileSync(geminiExtHooks, 'utf8'));
+      if (hooksData.hooks) {
+        for (const eventKey of Object.keys(hooksData.hooks)) {
+          if (Array.isArray(hooksData.hooks[eventKey])) {
+            hooksData.hooks[eventKey] = hooksData.hooks[eventKey].filter(
+              (entry) => !entry.hooks?.some((h) => h.command?.includes('purmemo_capture'))
+            );
+            if (hooksData.hooks[eventKey].length === 0) delete hooksData.hooks[eventKey];
+          }
+        }
+        const tmp = geminiExtHooks + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(hooksData, null, 2), 'utf8');
+        fs.renameSync(tmp, geminiExtHooks);
       }
     }
 
-    const tmp = SETTINGS_FILE + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(settings, null, 2), 'utf8');
-    fs.renameSync(tmp, SETTINGS_FILE);
+    if (fs.existsSync(geminiCaptureScript)) fs.unlinkSync(geminiCaptureScript);
   } catch {}
 }
 
@@ -303,7 +333,7 @@ async function promptInstallHooks() {
   console.log(chalk.gray('  Hooks (automatic):'));
   console.log(chalk.gray('  • Recall        — shows your 5 most recent memories at startup'));
   console.log(chalk.gray('  • Quick-load    — type a number (1-5) to load a memory fully'));
-  console.log(chalk.gray('  • Auto-capture  — saves progress on stop, compact, and every 10 tool calls'));
+  console.log(chalk.gray('  For auto-capture, install purmemoAMP: github.com/purmemo-ai/purmemo-amp'));
   console.log(chalk.gray('  Commands (you type):'));
   console.log(chalk.gray('  • /save         — save conversation as a living document'));
   console.log(chalk.gray('  • /recall       — search past memories'));
@@ -420,26 +450,10 @@ function patchSettings() {
     });
   }
 
-  // PostToolUse → capture (heartbeat)
-  if (!hooks.PostToolUse) hooks.PostToolUse = [];
-  if (!has(hooks.PostToolUse, 'purmemo_capture')) {
-    hooks.PostToolUse.push({
-      matcher: 'Bash|Edit|Write|MultiEdit|Task',
-      hooks: [{ type: 'command', command: hookCmd('purmemo_capture.js') }],
-    });
-  }
-
-  // PreCompact → capture
-  if (!hooks.PreCompact) hooks.PreCompact = [];
-  if (!has(hooks.PreCompact, 'purmemo_capture')) {
-    hooks.PreCompact.push({ hooks: [{ type: 'command', command: hookCmd('purmemo_capture.js') }] });
-  }
-
-  // Stop → capture
-  if (!hooks.Stop) hooks.Stop = [];
-  if (!has(hooks.Stop, 'purmemo_capture')) {
-    hooks.Stop.push({ matcher: '.*', hooks: [{ type: 'command', command: hookCmd('purmemo_capture.js') }] });
-  }
+  // Note: PostToolUse / PreCompact / Stop capture hooks were removed in v15.3.0.
+  // purmemoAMP is the canonical capture path — it watches session JSONL files
+  // directly via SessionStore + SessionMemoryExtractor and handles cloud sync.
+  // Users who want AMP capture: install purmemoAMP.app from github.com/purmemo-ai/purmemo-amp.
 
   // Write atomically
   const tmp = SETTINGS_FILE + '.tmp';
