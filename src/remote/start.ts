@@ -691,6 +691,15 @@ export async function startRemoteServer(ctx) {
     return app._router.handle(req, res, () => res.status(404).end());
   });
 
+  // ── /mcp/:key — API key in URL path (Figma Make workaround) ──
+  // Usage: https://mcp.purmemo.ai/mcp/YOUR_API_KEY
+  app.options('/mcp/:key', (req, res) => { res.writeHead(204, getCorsHeaders(req)); res.end(); });
+  app.post('/mcp/:key', (req, res) => {
+    req.headers.authorization = `Bearer ${req.params.key}`;
+    req.url = '/mcp/messages';
+    return app._router.handle(req, res, () => res.status(404).end());
+  });
+
   // ── /mcp/sse — legacy SSE endpoint (Python had this) ──
   app.get('/mcp/sse', async (req, res) => {
     // Forward to /sse handler
