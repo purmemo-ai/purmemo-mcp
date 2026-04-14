@@ -371,23 +371,6 @@ export async function startRemoteServer(ctx) {
     res.end();
   });
 
-  // ── API-key-in-URL endpoint (for clients with broken OAuth UIs, e.g. Figma Make) ──
-  // Usage: POST https://mcp.purmemo.ai/mcp-apikey/<your-api-key>/messages
-  //        GET  https://mcp.purmemo.ai/mcp-apikey/<your-api-key>/sse
-  // Injects the key as a Bearer token then re-dispatches to the real handler.
-  app.options('/mcp-apikey/:apikey', (req, res) => { res.writeHead(204, getCorsHeaders(req)); res.end(); });
-  app.options('/mcp-apikey/:apikey/messages', (req, res) => { res.writeHead(204, getCorsHeaders(req)); res.end(); });
-  app.options('/mcp-apikey/:apikey/sse', (req, res) => { res.writeHead(204, getCorsHeaders(req)); res.end(); });
-  app.post('/mcp-apikey/:apikey/messages', (req, res) => {
-    req.headers.authorization = `Bearer ${req.params.apikey}`;
-    req.url = '/mcp/messages';
-    return app._router.handle(req, res, () => res.status(404).end());
-  });
-  app.get('/mcp-apikey/:apikey/sse', (req, res) => {
-    req.headers.authorization = `Bearer ${req.params.apikey}`;
-    req.url = '/sse';
-    return app._router.handle(req, res, () => res.status(404).end());
-  });
 
   // ── POST /mcp/messages — main Streamable HTTP dispatch ──
   app.post('/mcp/messages', async (req, res) => {
@@ -706,15 +689,6 @@ export async function startRemoteServer(ctx) {
         error: { code: -32001, message: 'Authentication required. Add Authorization header: Bearer YOUR_API_KEY' }
       }, 401, getCorsHeaders(req));
     }
-    req.url = '/mcp/messages';
-    return app._router.handle(req, res, () => res.status(404).end());
-  });
-
-  // ── /mcp/:key — API key in URL path (Figma Make workaround) ──
-  // Usage: https://mcp.purmemo.ai/mcp/YOUR_API_KEY
-  app.options('/mcp/:key', (req, res) => { res.writeHead(204, getCorsHeaders(req)); res.end(); });
-  app.post('/mcp/:key', (req, res) => {
-    req.headers.authorization = `Bearer ${req.params.key}`;
     req.url = '/mcp/messages';
     return app._router.handle(req, res, () => res.status(404).end());
   });
