@@ -691,6 +691,25 @@ export async function startRemoteServer(ctx) {
     return app._router.handle(req, res, () => res.status(404).end());
   });
 
+  // ── /figma — Figma Make endpoint (header auth only, no OAuth discovery) ──
+  // Figma Make auto-discovers OAuth from /.well-known and opens a broken OAuth popup.
+  // This endpoint has NO corresponding /.well-known entry, so Figma uses headers directly.
+  // Usage in Figma Make: MCP server URL = https://mcp.purmemo.ai/figma
+  //                      Additional headers: Authorization = Bearer YOUR_API_KEY
+  app.options('/figma', (req, res) => { res.writeHead(204, getCorsHeaders(req)); res.end(); });
+  app.post('/figma', async (req, res) => {
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith('Bearer ')) {
+      // Return 401 WITHOUT WWW-Authenticate — no OAuth discovery hint
+      return sendJSON(res, {
+        jsonrpc: '2.0', id: req.body?.id ?? null,
+        error: { code: -32001, message: 'Authentication required. Add Authorization header: Bearer YOUR_API_KEY' }
+      }, 401, getCorsHeaders(req));
+    }
+    req.url = '/mcp/messages';
+    return app._router.handle(req, res, () => res.status(404).end());
+  });
+
   // ── /mcp/:key — API key in URL path (Figma Make workaround) ──
   // Usage: https://mcp.purmemo.ai/mcp/YOUR_API_KEY
   app.options('/mcp/:key', (req, res) => { res.writeHead(204, getCorsHeaders(req)); res.end(); });
