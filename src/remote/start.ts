@@ -55,6 +55,7 @@ export async function startRemoteServer(ctx) {
     'https://claude.ai', 'https://chat.openai.com', 'https://chatgpt.com',
     'https://gemini.google.com', 'https://app.purmemo.ai', 'https://purmemo.ai',
     'https://api.purmemo.ai', 'http://localhost:3000', 'http://localhost:3001',
+    'https://www.figma.com', 'https://figma.com',
   ];
   app.use((req, res, next) => {
     const origin = req.headers.origin;
@@ -218,6 +219,7 @@ export async function startRemoteServer(ctx) {
   const STREAMABLE_TRUSTED_ORIGINS = [
     'https://claude.ai', 'https://chat.openai.com', 'https://chatgpt.com',
     'https://gemini.google.com', 'https://app.purmemo.ai',
+    'https://www.figma.com', 'https://figma.com',
   ];
   function getCorsHeaders(req) {
     const origin = req?.headers?.origin;
@@ -367,6 +369,24 @@ export async function startRemoteServer(ctx) {
   app.options('/mcp/messages', (req, res) => {
     res.writeHead(204, CORS_HEADERS);
     res.end();
+  });
+
+  // ── API-key-in-URL endpoint (for clients with broken OAuth UIs, e.g. Figma Make) ──
+  // Usage: POST https://mcp.purmemo.ai/mcp-apikey/<your-api-key>/messages
+  //        GET  https://mcp.purmemo.ai/mcp-apikey/<your-api-key>/sse
+  // Injects the key as a Bearer token then re-dispatches to the real handler.
+  app.options('/mcp-apikey/:apikey', (req, res) => { res.writeHead(204, getCorsHeaders(req)); res.end(); });
+  app.options('/mcp-apikey/:apikey/messages', (req, res) => { res.writeHead(204, getCorsHeaders(req)); res.end(); });
+  app.options('/mcp-apikey/:apikey/sse', (req, res) => { res.writeHead(204, getCorsHeaders(req)); res.end(); });
+  app.post('/mcp-apikey/:apikey/messages', (req, res) => {
+    req.headers.authorization = `Bearer ${req.params.apikey}`;
+    req.url = '/mcp/messages';
+    return app._router.handle(req, res, () => res.status(404).end());
+  });
+  app.get('/mcp-apikey/:apikey/sse', (req, res) => {
+    req.headers.authorization = `Bearer ${req.params.apikey}`;
+    req.url = '/sse';
+    return app._router.handle(req, res, () => res.status(404).end());
   });
 
   // ── POST /mcp/messages — main Streamable HTTP dispatch ──
