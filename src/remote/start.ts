@@ -730,7 +730,17 @@ export async function startRemoteServer(ctx) {
   });
 
   // ── MCP well-known endpoints (for OAuth discovery) ──
+  // Helper: detect Figma Make requests (they send Origin: https://www.figma.com)
+  function isFigmaRequest(req) {
+    const origin = req.headers.origin || '';
+    const referer = req.headers.referer || '';
+    const ua = req.headers['user-agent'] || '';
+    return origin.includes('figma.com') || referer.includes('figma.com') || ua.includes('Figma');
+  }
+
   app.get('/.well-known/oauth-protected-resource', (req, res) => {
+    // Figma Make: return 404 so it doesn't discover OAuth and trigger the broken popup
+    if (isFigmaRequest(req)) return res.status(404).json({ error: 'not_found' });
     const serverUrl = `https://${req.get('host')}`;
     res.json({
       resource: serverUrl,
@@ -741,6 +751,8 @@ export async function startRemoteServer(ctx) {
   });
 
   app.get('/.well-known/oauth-authorization-server', (req, res) => {
+    // Figma Make: return 404 so it doesn't discover OAuth and trigger the broken popup
+    if (isFigmaRequest(req)) return res.status(404).json({ error: 'not_found' });
     const serverUrl = `https://${req.get('host')}`;
     res.json({
       issuer: serverUrl,
@@ -866,6 +878,7 @@ export async function startRemoteServer(ctx) {
 
   // ── OAuth: Dynamic Client Registration ──
   app.post('/oauth/register', (req, res) => {
+    if (isFigmaRequest(req)) return res.status(404).json({ error: 'not_found' });
     if (!checkRateLimit(getClientIp(req), 'register', 5)) {
       return res.status(429).json({ error: 'Too many registration requests. Retry after 60 seconds.' });
     }
