@@ -135,12 +135,14 @@ async function runSetup() {
   // 3. Browser-open OAuth flow
   console.log(chalk.white('Connecting your pūrmemo account…\n'));
 
-  let sessionId;
+  let sessionId: string;
+  let pairingCode: string;
   try {
     const res = await fetch(`${API_URL}/api/v1/auth/cli/request`, { method: 'POST' });
     if (!res.ok) throw new Error(`Server returned ${res.status}`);
     const data = await res.json();
     sessionId = data.session_id;
+    pairingCode = data.pairing_code;
   } catch (err) {
     console.error(chalk.red(`\n❌ Could not reach pūrmemo servers: ${err.message}`));
     console.log(chalk.gray('Check your internet connection and try again.'));
@@ -151,6 +153,11 @@ async function runSetup() {
   console.log(chalk.cyan('🌐 Opening your browser…'));
   console.log(chalk.gray(`   ${connectUrl}\n`));
   console.log(chalk.gray('If the browser did not open, copy the URL above and paste it manually.\n'));
+
+  // Display pairing code — user must type this into the browser
+  console.log(chalk.bold('Your pairing code:'));
+  console.log(chalk.bgWhite.black.bold(`  ${pairingCode}  `));
+  console.log(chalk.gray('Enter this code in the browser when asked.\n'));
 
   try {
     const open = (await import('open')).default;
