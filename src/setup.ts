@@ -71,7 +71,21 @@ async function runSetup() {
       console.log(chalk.yellow('⚡ Switching account…'));
       // fall through to the API key auth path below
     } else {
-      const info = await tokenStore.getUserInfo();
+      // Fetch live tier from API — auth.json may be stale after a plan upgrade
+      let info = await tokenStore.getUserInfo();
+      try {
+        const meRes = await fetch(`${API_URL}/api/v1/auth/me`, {
+          headers: { Authorization: `Bearer ${existing.access_token}` },
+        });
+        if (meRes.ok) {
+          const me = await meRes.json() as { email?: string; tier?: string };
+          if (me.tier && me.tier !== info?.tier) {
+            // Persist fresh tier to auth.json
+            await tokenStore.saveToken({ ...existing, user: { ...existing.user, email: me.email || existing.user?.email || '' }, user_tier: me.tier });
+            info = { ...info, email: me.email || info?.email, tier: me.tier };
+          }
+        }
+      } catch { /* non-blocking — use cached info if API unreachable */ }
       console.log(chalk.green('✅ Already connected!'));
       console.log(chalk.gray(`   Account: ${info?.email || 'unknown'}`));
       console.log(chalk.gray(`   Tier:    ${info?.tier || 'free'}`));
