@@ -1,12 +1,12 @@
 {
   "manifest_version": "0.3",
   "name": "purmemo-mcp",
-  "display_name": "p\u016brmemo \u2014 AI Memory",
-  "version": "15.3.2",
+  "display_name": "pūrmemo — AI Memory",
+  "version": "15.3.3",
   "description": "Persistent AI memory + workflows for Claude. Save conversations, recall context, and run memory-powered workflows across every session.",
-  "long_description": "p\u016brmemo gives Claude a memory that persists across sessions and structured workflows powered by your memory.\n\n**What it does:**\n- **Save** \u2014 Store conversations as living documents that update over time\n- **Recall** \u2014 Search and surface relevant memories when you need them\n- **Workflows** \u2014 Run 15+ memory-powered workflows (PRD, debug, sprint, growth, etc.) pre-loaded with your context\n- **Auto-capture** \u2014 Works silently in the background, capturing every session\n- **Cross-platform** \u2014 Memories from Claude Desktop, Claude Code, Chrome extension, and more \u2014 all in one place\n\n**Tools included:**\n- `save_conversation` \u2014 Save any conversation to your memory\n- `save_artifact` \u2014 Save artifacts (research reports, tables, specs) linked to conversations\n- `recall_memories` \u2014 Search your memory with natural language\n- `get_memory_details` \u2014 Retrieve a full conversation by ID\n- `discover_related_conversations` \u2014 Find related memories across all platforms\n- `get_user_context` \u2014 View memory stats and recent activity\n- `run_workflow` \u2014 Run memory-powered workflows (PRD, debug, sprint, etc.)\n- `list_workflows` \u2014 Browse all available workflows by category\n- `share_memory` \u2014 Share a memory publicly with a shareable link\n- `recall_public` \u2014 Search publicly shared memories from all users\n- `get_public_memory` \u2014 Retrieve a publicly shared memory by ID\n- `report_memory` \u2014 Report inappropriate or harmful public memories",
+  "long_description": "pūrmemo gives Claude a memory that persists across sessions and structured workflows powered by your memory.\n\n**What it does:**\n- **Save** — Store conversations as living documents that update over time\n- **Recall** — Search and surface relevant memories when you need them\n- **Workflows** — Run 15+ memory-powered workflows (PRD, debug, sprint, growth, etc.) pre-loaded with your context\n- **Auto-capture** — Works silently in the background, capturing every session\n- **Cross-platform** — Memories from Claude Desktop, Claude Code, Chrome extension, and more — all in one place\n\n**Tools included:**\n- `save_conversation` — Save any conversation to your memory\n- `save_artifact` — Save artifacts (research reports, tables, specs) linked to conversations\n- `recall_memories` — Search your memory with natural language\n- `get_memory_details` — Retrieve a full conversation by ID\n- `discover_related_conversations` — Find related memories across all platforms\n- `get_user_context` — View memory stats and recent activity\n- `run_workflow` — Run memory-powered workflows (PRD, debug, sprint, etc.)\n- `list_workflows` — Browse all available workflows by category\n- `share_memory` — Share a memory publicly with a shareable link\n- `recall_public` — Search publicly shared memories from all users\n- `get_public_memory` — Retrieve a publicly shared memory by ID\n- `report_memory` — Report inappropriate or harmful public memories",
   "author": {
-    "name": "p\u016brmemo",
+    "name": "pūrmemo",
     "email": "support@purmemo.ai",
     "url": "https://purmemo.ai"
   },
@@ -44,8 +44,8 @@
   "user_config": {
     "api_key": {
       "type": "string",
-      "title": "p\u016brmemo API Key",
-      "description": "Your API key from app.purmemo.ai. Go to Settings \u2192 API Keys to generate one.",
+      "title": "pūrmemo API Key",
+      "description": "Your API key from app.purmemo.ai. Go to Settings → API Keys to generate one.",
       "sensitive": true,
       "required": true
     }

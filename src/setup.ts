@@ -245,7 +245,17 @@ async function runHooksOnly() {
 // ─── Hook installation ────────────────────────────────────────────────────────
 
 function hooksAlreadyInstalled() {
-  return HOOK_SCRIPTS.every(f => fs.existsSync(path.join(HOOKS_DIR, f)));
+  if (!HOOK_SCRIPTS.every(f => fs.existsSync(path.join(HOOKS_DIR, f)))) return false;
+  // Also verify event bindings are correct in settings.json
+  try {
+    if (!fs.existsSync(SETTINGS_FILE)) return false;
+    const settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+    const hooks = settings.hooks || {};
+    const has = (arr: unknown[], name: string) =>
+      Array.isArray(arr) && arr.some((e: any) => e.hooks?.some((h: any) => h.command?.includes(name)));
+    return has(hooks.SessionStart, 'purmemo_recall') &&
+           has(hooks.UserPromptSubmit, 'purmemo_first_message');
+  } catch { return false; }
 }
 
 function hooksOutdated(): boolean {
