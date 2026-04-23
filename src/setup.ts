@@ -488,16 +488,21 @@ async function wireMcpServer() {
     apiKey = token?.access_token || '';
   }
 
-  // Claude Code
+  // Claude Code — include PURMEMO_API_KEY so the MCP process has auth at startup
   try {
-    execSync('claude mcp add purmemo -- npx -y purmemo-mcp', {
+    // Remove existing entry first (idempotent re-registration with fresh key)
+    execSync('claude mcp remove purmemo', { stdio: 'ignore', timeout: 5000 });
+  } catch { /* not registered yet — that's fine */ }
+  try {
+    const envFlag = apiKey ? `-e PURMEMO_API_KEY=${apiKey} ` : '';
+    execSync(`claude mcp add purmemo ${envFlag}-- npx -y purmemo-mcp@latest`, {
       stdio: 'ignore',
       timeout: 10000,
     });
     console.log(chalk.green('✅ MCP server registered with Claude Code'));
   } catch {
     console.log(chalk.gray('To add the MCP server manually, run:'));
-    console.log(chalk.cyan('   claude mcp add purmemo -- npx -y purmemo-mcp'));
+    console.log(chalk.cyan(`   claude mcp add purmemo${apiKey ? ` -e PURMEMO_API_KEY=${apiKey}` : ''} -- npx -y purmemo-mcp@latest`));
     console.log('');
   }
 
