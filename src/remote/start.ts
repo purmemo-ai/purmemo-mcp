@@ -959,6 +959,57 @@ export async function startRemoteServer(ctx) {
     res.type('html').send(html);
   });
 
+  // ── Helper: mint or reuse a long-lived API key for OAuth sessions ────────────
+  // JWTs expire in 4 hours and refresh tokens are in-memory (wiped on Render restart).
+  // API keys are stored in v1_mvp.api_keys (DB), survive restarts, and last 365 days.
+  async function mintOAuthApiKey(jwtToken: string): Promise<string | null> {
+    const keyName = `claude.ai (${new Date().toISOString().split('T')[0]})`;
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${jwtToken}`,
+      'User-Agent': `purmemo-mcp/${CLIENT_VERSION}`,
+    };
+
+    // Check for existing active claude.ai key to avoid accumulation on reconnect
+    try {
+      const listResp = await fetch(`${API_URL}/api/v1/api-keys/`, { headers, signal: AbortSignal.timeout(8000) });
+      if (listResp.ok) {
+        const { api_keys } = await listResp.json();
+        const existing = api_keys?.find((k: any) => k.name?.startsWith('claude.ai') && k.is_active);
+        if (existing?.key_prefix) {
+          // Can't return the full key (only prefix is stored) — mint a fresh one
+          // but revoke the old one first to keep the account clean
+          await fetch(`${API_URL}/api/v1/api-keys/${existing.id}`, { method: 'DELETE', headers, signal: AbortSignal.timeout(5000) }).catch(() => {});
+        }
+      }
+    } catch { /* non-fatal — proceed to mint */ }
+
+    // Mint a new long-lived API key
+    const mintResp = await fetch(`${API_URL}/api/v1/api-keys/`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: keyName }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!mintResp.ok) return null;
+    const { full_key } = await mintResp.json();
+    return full_key || null;
+  }
+
+  // ── Shared: build OAuth redirect URL from params ──────────────────────────
+  function buildAuthorizeRedirect(sessionParam: string, params?: string): string {
+    if (!params) return `/oauth/authorize?session=${sessionParam}`;
+    const oauthParams = JSON.parse(Buffer.from(params, 'base64url').toString());
+    let url = `/oauth/authorize?client_id=${oauthParams.client_id}`;
+    url += `&redirect_uri=${encodeURIComponent(oauthParams.redirect_uri)}`;
+    url += `&response_type=code&code_challenge=${oauthParams.code_challenge}`;
+    url += `&code_challenge_method=${oauthParams.code_challenge_method || 'S256'}`;
+    if (oauthParams.scope) url += `&scope=${oauthParams.scope}`;
+    if (oauthParams.state) url += `&state=${oauthParams.state}`;
+    url += `&session=${sessionParam}`;
+    return url;
+  }
+
   // ── OAuth: Login Submit ──
   app.post('/login', async (req, res) => {
     if (!checkRateLimit(getClientIp(req), 'login', 10)) {
@@ -978,24 +1029,15 @@ export async function startRemoteServer(ctx) {
         return res.redirect(loginUrl);
       }
       const authData = await authResp.json();
-      const apiKey = authData.api_key || authData.access_token;
-      if (!apiKey) return res.status(500).send('No API key returned');
+      const jwt = authData.access_token;
+      if (!jwt) return res.status(500).send('No token returned from login');
 
-      if (authData.refresh_token) refreshTokenStore[apiKey] = { token: authData.refresh_token, createdAt: Date.now() };
-      const sessionParam = Buffer.from(apiKey).toString('base64');
+      // Mint a long-lived API key — survives Render restarts and 4hr JWT expiry
+      const longLivedKey = await mintOAuthApiKey(jwt);
+      if (!longLivedKey) return res.status(500).send('Failed to provision API key');
 
-      if (params) {
-        const oauthParams = JSON.parse(Buffer.from(params, 'base64url').toString());
-        let authorizeUrl = `/oauth/authorize?client_id=${oauthParams.client_id}`;
-        authorizeUrl += `&redirect_uri=${encodeURIComponent(oauthParams.redirect_uri)}`;
-        authorizeUrl += `&response_type=code&code_challenge=${oauthParams.code_challenge}`;
-        authorizeUrl += `&code_challenge_method=${oauthParams.code_challenge_method || 'S256'}`;
-        if (oauthParams.scope) authorizeUrl += `&scope=${oauthParams.scope}`;
-        if (oauthParams.state) authorizeUrl += `&state=${oauthParams.state}`;
-        authorizeUrl += `&session=${sessionParam}`;
-        return res.redirect(authorizeUrl);
-      }
-      res.redirect(`/oauth/authorize?session=${sessionParam}`);
+      const sessionParam = Buffer.from(longLivedKey).toString('base64');
+      return res.redirect(buildAuthorizeRedirect(sessionParam, params));
     } catch (e) {
       structuredLog.error('Login error', { error: e.message });
       res.status(500).send('Login failed');
@@ -1020,26 +1062,21 @@ export async function startRemoteServer(ctx) {
         return res.redirect(loginUrl);
       }
       const authData = await regResp.json();
-      const apiKey = authData.api_key || authData.access_token;
-      if (!apiKey) {
+      const jwt = authData.access_token;
+      if (!jwt) {
         const loginUrl = params ? `/login?params=${params}&signup_complete=1` : '/login?signup_complete=1';
         return res.redirect(loginUrl);
       }
-      if (authData.refresh_token) refreshTokenStore[apiKey] = { token: authData.refresh_token, createdAt: Date.now() };
-      const sessionParam = Buffer.from(apiKey).toString('base64');
 
-      if (params) {
-        const oauthParams = JSON.parse(Buffer.from(params, 'base64url').toString());
-        let authorizeUrl = `/oauth/authorize?client_id=${oauthParams.client_id}`;
-        authorizeUrl += `&redirect_uri=${encodeURIComponent(oauthParams.redirect_uri)}`;
-        authorizeUrl += `&response_type=code&code_challenge=${oauthParams.code_challenge}`;
-        authorizeUrl += `&code_challenge_method=${oauthParams.code_challenge_method || 'S256'}`;
-        if (oauthParams.scope) authorizeUrl += `&scope=${oauthParams.scope}`;
-        if (oauthParams.state) authorizeUrl += `&state=${oauthParams.state}`;
-        authorizeUrl += `&session=${sessionParam}`;
-        return res.redirect(authorizeUrl);
+      // Mint a long-lived API key — survives Render restarts and 4hr JWT expiry
+      const longLivedKey = await mintOAuthApiKey(jwt);
+      if (!longLivedKey) {
+        const loginUrl = params ? `/login?params=${params}&signup_complete=1` : '/login?signup_complete=1';
+        return res.redirect(loginUrl);
       }
-      res.redirect(`/oauth/authorize?session=${sessionParam}`);
+
+      const sessionParam = Buffer.from(longLivedKey).toString('base64');
+      return res.redirect(buildAuthorizeRedirect(sessionParam, params));
     } catch (e) {
       structuredLog.error('Register error', { error: e.message });
       res.status(500).send('Registration failed');
