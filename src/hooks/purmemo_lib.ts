@@ -54,9 +54,12 @@ const API_URL = process.env.PURMEMO_API_URL || 'https://api.purmemo.ai';
 
 export type Platform = 'claude' | 'gemini';
 
+// Events that ONLY Gemini CLI uses. SessionStart/SessionEnd are shared with
+// Claude Code, so they MUST NOT be here — matching them would mislabel every
+// Claude Code SessionEnd/SessionStart invocation as a Gemini session.
 const GEMINI_EVENTS = new Set([
   'AfterTool', 'BeforeTool', 'AfterAgent', 'BeforeAgent',
-  'PreCompress', 'SessionEnd',
+  'PreCompress',
 ]);
 
 /** Normalize Gemini event names to Claude Code equivalents for internal logic */
@@ -66,8 +69,8 @@ const GEMINI_TO_INTERNAL: Record<string, string> = {
   'AfterAgent': 'Stop',
   'BeforeAgent': 'UserPromptSubmit',
   'PreCompress': 'PreCompact',
-  'SessionEnd': 'SessionEnd',
-  'SessionStart': 'SessionStart',
+  // SessionStart/SessionEnd are identical across platforms — no normalization needed,
+  // and they must NOT be keys that trigger the Gemini branch in detectPlatform.
 };
 
 const INTERNAL_TO_GEMINI: Record<string, string> = Object.fromEntries(
@@ -80,7 +83,7 @@ export function detectPlatform(input?: HookInput): Platform {
   if (_detectedPlatform) return _detectedPlatform;
   if (input?.hook_event_name && GEMINI_EVENTS.has(input.hook_event_name)) {
     _detectedPlatform = 'gemini';
-  } else if (input?.transcript_path?.includes('.gemini/')) {
+  } else if (input?.transcript_path?.startsWith(path.join(os.homedir(), '.gemini') + path.sep)) {
     _detectedPlatform = 'gemini';
   } else if (process.env.MCP_PLATFORM === 'gemini') {
     _detectedPlatform = 'gemini';
@@ -90,7 +93,7 @@ export function detectPlatform(input?: HookInput): Platform {
   return _detectedPlatform;
 }
 
-/** Normalize incoming event name to internal (Claude Code) name */
+/** Normalize incoming Gemini event name to internal (Claude Code) name */
 export function normalizeEvent(eventName: string): string {
   return GEMINI_TO_INTERNAL[eventName] || eventName;
 }
@@ -417,7 +420,9 @@ export async function saveChunked(
   conversationId: string,
   tags: string[],
   metadata: Record<string, unknown>,
+  platform: Platform = 'claude',
 ): Promise<boolean> {
+  const platformName = platform === 'gemini' ? 'gemini' : 'claude-code';
   const chunks = chunkContent(content);
   const totalParts = chunks.length;
   let success = true;
@@ -428,7 +433,7 @@ export async function saveChunked(
       content: chunks[i],
       title: `${title} (${partNumber}/${totalParts})`,
       conversation_id: `${conversationId}:part:${partNumber}`,
-      platform: 'claude-code',
+      platform: platformName,
       tags: [...tags, 'chunked-conversation', `session:${conversationId}`],
       metadata: { ...metadata, captureType: 'chunked', partNumber, totalParts, chunkSize: chunks[i].length },
     });
@@ -441,7 +446,7 @@ export async function saveChunked(
     content: indexContent,
     title: `${title} — Index`,
     conversation_id: `${conversationId}:index`,
-    platform: 'claude-code',
+    platform: platformName,
     tags: [...tags, 'chunked-conversation'],
     metadata: { ...metadata, captureType: 'index', totalParts },
   });

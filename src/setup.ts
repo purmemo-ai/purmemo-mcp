@@ -133,6 +133,7 @@ async function runSetup() {
         tier:  user.tier  || 'free',
       },
     });
+    syncKeyToShellRc(process.env.PURMEMO_API_KEY);
 
     console.log(chalk.green.bold('🎉 Connected!\n'));
     console.log(chalk.gray(`   Account: ${user.email}`));
@@ -203,6 +204,7 @@ async function runSetup() {
           tier:  pollData.tier  || 'free',
         },
       });
+      syncKeyToShellRc(pollData.api_key);
 
       console.log(chalk.green.bold('\n🎉 Connected!\n'));
       console.log(chalk.gray(`   Account: ${pollData.email || 'connected'}`));
@@ -492,15 +494,42 @@ function patchSettings() {
   fs.renameSync(tmp, SETTINGS_FILE);
 }
 
+// ─── Sync API key to shell rc files so hooks always use the current key ───────
+
+function syncKeyToShellRc(apiKey: string) {
+  const rcFiles = [
+    path.join(os.homedir(), '.zshrc'),
+    path.join(os.homedir(), '.bashrc'),
+  ];
+  const exportLine = `export PURMEMO_API_KEY=${apiKey}`;
+  const marker = 'PURMEMO_API_KEY=';
+
+  for (const rcFile of rcFiles) {
+    if (!fs.existsSync(rcFile)) continue;
+    try {
+      const content = fs.readFileSync(rcFile, 'utf8');
+      const lines = content.split('\n');
+      const idx = lines.findIndex(l => l.includes(marker));
+      if (idx !== -1) {
+        if (lines[idx] === exportLine) continue; // already current
+        lines[idx] = exportLine;
+        fs.writeFileSync(rcFile, lines.join('\n'), 'utf8');
+      }
+      // If not found, don't add it — only update existing entries to avoid
+      // writing to rc files the user hasn't opted into
+    } catch { /* non-fatal */ }
+  }
+}
+
 // ─── Wire MCP server into Claude Code ─────────────────────────────────────────
 
 async function wireMcpServer() {
-  // Get API key for platform configs
-  let apiKey = process.env.PURMEMO_API_KEY || '';
-  if (!apiKey) {
-    const token = await tokenStore.getToken();
-    apiKey = token?.access_token || '';
-  }
+  // Get API key — prefer auth.json (source of truth) over env var
+  // Env var is set by `claude mcp add -e PURMEMO_API_KEY=...` and can drift
+  // when a new key is minted without updating the shell. auth.json is always
+  // written fresh on every successful setup/login.
+  const token = await tokenStore.getToken();
+  let apiKey = token?.access_token || process.env.PURMEMO_API_KEY || '';
 
   // Claude Code — include PURMEMO_API_KEY so the MCP process has auth at startup
   try {
