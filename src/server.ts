@@ -167,8 +167,8 @@ function readCurrentSessionId() {
   }
 }
 
-// API key resolution: env var wins, then ~/.purmemo/auth.json (set by `npx purmemo-mcp setup`)
-let resolvedApiKey = process.env.PURMEMO_API_KEY || null;
+// API key — resolved from ~/.purmemo/auth.json at startup (single source of truth)
+let resolvedApiKey: string | null = null;
 
 // Last recall result cache — maps ordinal "1"-"N" to UUID for get_memory_details
 let lastRecallIds = [];
@@ -1759,22 +1759,19 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
 });
 
 // ============================================================================
-// Startup: resolve API key (env var → ~/.purmemo/auth.json) then connect
+// Startup: resolve API key from ~/.purmemo/auth.json (single source of truth)
 // ============================================================================
 
 async function resolveApiKey() {
-  // Priority 1: explicit env var
-  if (process.env.PURMEMO_API_KEY) {
-    structuredLog.info('API key resolved from environment variable');
-    return process.env.PURMEMO_API_KEY;
-  }
-
-  // Priority 2: token saved by `npx purmemo-mcp setup`
+  // auth.json is the single source of truth — written by `npx purmemo-mcp setup`
+  // on every login. The PURMEMO_API_KEY env var is no longer read here: it was
+  // the root cause of cross-account saves when a stale key leaked into another
+  // machine's shell environment (ADR-031, 2026-04-24).
   try {
     const tokenStore = new TokenStore();
     const token = await tokenStore.getToken();
     if (token?.access_token) {
-      structuredLog.info('API key resolved from ~/.purmemo/auth.json (run via npx purmemo-mcp setup)');
+      structuredLog.info('API key resolved from ~/.purmemo/auth.json');
       return token.access_token;
     }
   } catch (err) {
@@ -1814,7 +1811,7 @@ if (REMOTE_MODE) {
 
   // If running interactively in a terminal (not piped by an MCP client) and
   // no auth is configured, redirect to setup instead of silently hanging.
-  if (process.stdin.isTTY && !process.env.PURMEMO_API_KEY) {
+  if (process.stdin.isTTY) {
     const _ts = new TokenStore();
     const _tok = await _ts.getToken();
     if (!_tok?.access_token) {
@@ -1839,7 +1836,7 @@ if (REMOTE_MODE) {
         tier: '4-resources-prompts',
         api_url: API_URL,
         api_key_configured: !!resolvedApiKey,
-        api_key_source: process.env.PURMEMO_API_KEY ? 'env_var' : (resolvedApiKey ? 'token_store' : 'none'),
+        api_key_source: resolvedApiKey ? 'auth_json' : 'none',
         platform: PLATFORM,
         tools_count: TOOLS.length,
         circuit_breaker_enabled: true,

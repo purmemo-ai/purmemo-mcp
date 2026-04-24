@@ -204,7 +204,6 @@ function getEncryptionKey(): Buffer {
 
 export function loadApiKey(): string | null {
   try {
-    if (process.env.PURMEMO_API_KEY) return process.env.PURMEMO_API_KEY;
     const tokenFile = path.join(os.homedir(), '.purmemo', 'auth.json');
     if (!fs.existsSync(tokenFile)) return null;
     const encryptedData = JSON.parse(fs.readFileSync(tokenFile, 'utf8'));

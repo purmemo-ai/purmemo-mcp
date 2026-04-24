@@ -241,7 +241,7 @@ async function runSetup() {
 async function runHooksOnly() {
   console.log(chalk.cyan(banner));
   const token = await tokenStore.getToken();
-  if (!token?.access_token && !process.env.PURMEMO_API_KEY) {
+  if (!token?.access_token) {
     console.log(chalk.yellow('⚠️  Not connected. Run setup first:'));
     console.log(chalk.cyan('   npx purmemo-mcp setup'));
     process.exit(1);
@@ -524,43 +524,38 @@ function syncKeyToShellRc(apiKey: string) {
 // ─── Wire MCP server into Claude Code ─────────────────────────────────────────
 
 async function wireMcpServer() {
-  // Get API key — prefer auth.json (source of truth) over env var
-  // Env var is set by `claude mcp add -e PURMEMO_API_KEY=...` and can drift
-  // when a new key is minted without updating the shell. auth.json is always
-  // written fresh on every successful setup/login.
-  const token = await tokenStore.getToken();
-  let apiKey = token?.access_token || process.env.PURMEMO_API_KEY || '';
+  // auth.json is the single source of truth — no API key baked into any
+  // platform config. The MCP process reads auth.json at startup.
+  // This eliminates the env var drift that caused cross-account saves (ADR-031).
 
-  // Claude Code — include PURMEMO_API_KEY so the MCP process has auth at startup
+  // Claude Code — no -e flag, server reads auth.json at startup
   try {
-    // Remove existing entry first (idempotent re-registration with fresh key)
     execSync('claude mcp remove purmemo', { stdio: 'ignore', timeout: 5000 });
-  } catch { /* not registered yet — that's fine */ }
+  } catch { /* not registered yet — fine */ }
   try {
-    const envFlag = apiKey ? `-e PURMEMO_API_KEY=${apiKey} ` : '';
-    execSync(`claude mcp add purmemo ${envFlag}-- npx -y purmemo-mcp@latest`, {
+    execSync(`claude mcp add purmemo -- npx -y purmemo-mcp@latest`, {
       stdio: 'ignore',
       timeout: 10000,
     });
     console.log(chalk.green('✅ MCP server registered with Claude Code'));
   } catch {
     console.log(chalk.gray('To add the MCP server manually, run:'));
-    console.log(chalk.cyan(`   claude mcp add purmemo${apiKey ? ` -e PURMEMO_API_KEY=${apiKey}` : ''} -- npx -y purmemo-mcp@latest`));
+    console.log(chalk.cyan(`   claude mcp add purmemo -- npx -y purmemo-mcp@latest`));
     console.log('');
   }
 
   // Codex (OpenAI)
-  wireCodex(apiKey);
+  wireCodex();
   installCodexSkill();
 
   // Gemini CLI (Google)
-  wireGemini(apiKey);
+  wireGemini();
   installGeminiExtension();
 }
 
 // ─── Wire MCP server into OpenAI Codex ────────────────────────────────────────
 
-function wireCodex(apiKey: string) {
+function wireCodex() {
   const codexConfig = path.join(os.homedir(), '.codex', 'config.toml');
   if (!fs.existsSync(codexConfig)) return;
 
@@ -571,9 +566,7 @@ function wireCodex(apiKey: string) {
       return;
     }
 
-    const purmemoLine = apiKey
-      ? `purmemo = { command = "npx", args = ["-y", "purmemo-mcp@latest"], env = { PURMEMO_API_KEY = "${apiKey}", MCP_PLATFORM = "codex" } }`
-      : `purmemo = { command = "npx", args = ["-y", "purmemo-mcp@latest"], env = { MCP_PLATFORM = "codex" } }`;
+    const purmemoLine = `purmemo = { command = "npx", args = ["-y", "purmemo-mcp@latest"], env = { MCP_PLATFORM = "codex" } }`;
 
     if (content.includes('[mcp_servers]')) {
       content = content.replace(/(\[mcp_servers\]\n)/, `$1${purmemoLine}\n`);
@@ -592,7 +585,7 @@ function wireCodex(apiKey: string) {
 
 // ─── Wire MCP server into Gemini CLI ──────────────────────────────────────────
 
-function wireGemini(apiKey: string) {
+function wireGemini() {
   const geminiConfig = path.join(os.homedir(), '.gemini', 'settings.json');
   if (!fs.existsSync(geminiConfig)) return;
 
@@ -609,7 +602,6 @@ function wireGemini(apiKey: string) {
       command: 'npx',
       args: ['-y', 'purmemo-mcp@latest'],
       env: {
-        ...(apiKey ? { PURMEMO_API_KEY: apiKey } : {}),
         MCP_PLATFORM: 'gemini',
       },
     };
@@ -751,20 +743,15 @@ function printSuccess() {
 async function runStatus() {
   console.log(chalk.cyan(banner));
 
-  if (process.env.PURMEMO_API_KEY) {
-    console.log(chalk.green('✅ Connected via PURMEMO_API_KEY environment variable'));
-    await testApiKey(process.env.PURMEMO_API_KEY);
-  } else {
-    const token = await tokenStore.getToken();
-    if (!token?.access_token) {
-      console.log(chalk.yellow('⚠️  Not connected'));
-      console.log(chalk.gray('\nRun setup to connect:'));
-      console.log(chalk.cyan('   npx purmemo-mcp setup'));
-      return;
-    }
-    console.log(chalk.green('✅ Connected via ~/.purmemo/auth.json'));
-    await testApiKey(token.access_token);
+  const token = await tokenStore.getToken();
+  if (!token?.access_token) {
+    console.log(chalk.yellow('⚠️  Not connected'));
+    console.log(chalk.gray('\nRun setup to connect:'));
+    console.log(chalk.cyan('   npx purmemo-mcp setup'));
+    return;
   }
+  console.log(chalk.green('✅ Connected via ~/.purmemo/auth.json'));
+  await testApiKey(token.access_token);
 
   console.log('');
   if (hooksAlreadyInstalled()) {

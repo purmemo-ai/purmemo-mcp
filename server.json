@@ -6,7 +6,7 @@
     "url": "https://github.com/purmemo-ai/purmemo-mcp",
     "source": "github"
   },
-  "version": "15.3.6",
+  "version": "15.3.7",
   "icon": {
     "src": "https://purmemo.ai/favicon.png"
   },
@@ -70,7 +70,7 @@
     {
       "registryType": "npm",
       "identifier": "purmemo-mcp",
-      "version": "15.3.6",
+      "version": "15.3.7",
       "runtimeHint": "node",
       "transport": {
         "type": "stdio"
