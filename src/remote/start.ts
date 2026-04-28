@@ -12,6 +12,7 @@ import {
   handleSaveConversation,
   handleSaveArtifact,
   handleCommit,
+  handleSnapshot,
   handleGetUserContext,
   handleRunWorkflow,
   handleListWorkflows,
@@ -258,6 +259,7 @@ export async function startRemoteServer(ctx) {
       'save_conversation': handleSaveConversation, // local for tag preservation + validation parity
       'save_artifact': handleSaveArtifact,
       'commit': handleCommit,
+      'snapshot': handleSnapshot,
       'share_memory': handleShareMemory,
       'recall_public': handleRecallPublic,
       'get_public_memory': handleGetPublicMemory,

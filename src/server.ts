@@ -71,6 +71,7 @@ import {
   handleSaveConversation,
   handleSaveArtifact,
   handleCommit,
+  handleSnapshot,
   handleDiscoverRelated,
   handleRecallMemories,
   handleGetMemoryDetails,
@@ -465,6 +466,44 @@ EXAMPLES:
         }
       },
       required: ['title', 'commitment_type', 'content']
+    }
+  },
+  // ADR-032 / ADR-034: Snapshot — generate a state-shaped artifact for a topic.
+  {
+    name: 'snapshot',
+    annotations: {
+      title: 'Generate a Snapshot for a Topic',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true
+    },
+    description: `Generate a state-shaped artifact for a topic from your saved memories.
+
+WHEN TO USE: When you want a current-state document derived from saved conversations — architecture map, glossary, runbook, manifesto, project state. The slash command /snapshot calls this.
+
+HOW IT WORKS:
+1. Queries memories matching the topic (fuzzy match against tags + title), recency-weighted.
+2. Builds a draft snapshot via the deterministic baseline generator (concatenates source memories — Phase 1 baseline; Gemini integration ships later).
+3. Computes evidence_tier (A/B/C, deterministic) and grounded_ratio (claim verification).
+4. Persists as status='draft'. Promotion to canonical requires explicit POST /api/v1/snapshots/{id}/accept per ADR-032.
+
+INSERT-only — each call creates a new draft (versioned). Two snapshots of the same topic both exist; supersede via /accept.
+
+EXAMPLES:
+- snapshot(topic: "architecture") — gathers all memories tagged or titled with "architecture"
+- snapshot(topic: "auth") — pulls everything auth-related, recency-weighted`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        topic: {
+          type: 'string',
+          description: 'The topic to snapshot. A keyword that fuzzy-matches memory tags and titles. Examples: "architecture", "glossary", "auth", "onboarding".',
+          minLength: 1,
+          maxLength: 200
+        }
+      },
+      required: ['topic']
     }
   },
   {
@@ -1498,6 +1537,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return withUpdateNotice(await handleSaveArtifact(args));
     case 'commit':
       return withUpdateNotice(await handleCommit(args));
+    case 'snapshot':
+      return withUpdateNotice(await handleSnapshot(args));
     case 'recall_memories':
       return withUpdateNotice(await handleRecallMemories(args));
     case 'get_memory_details':

@@ -6,7 +6,7 @@
     "url": "https://github.com/purmemo-ai/purmemo-mcp",
     "source": "github"
   },
-  "version": "15.4.0",
+  "version": "15.5.0",
   "icon": {
     "src": "https://purmemo.ai/favicon.png"
   },
@@ -19,6 +19,9 @@
     },
     {
       "name": "commit"
+    },
+    {
+      "name": "snapshot"
     },
     {
       "name": "recall_memories"
@@ -73,7 +76,7 @@
     {
       "registryType": "npm",
       "identifier": "purmemo-mcp",
-      "version": "15.4.0",
+      "version": "15.5.0",
       "runtimeHint": "node",
       "transport": {
         "type": "stdio"

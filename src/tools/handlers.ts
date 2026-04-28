@@ -821,6 +821,96 @@ export async function handleCommit(args) {
   }
 }
 
+// ADR-032 / ADR-034: Snapshot a topic — generate a state-shaped artifact.
+// Thin wrapper over POST /api/v1/snapshots/. The user-facing slash command
+// /snapshot calls this. Returns the draft snapshot id; promotion to canonical
+// is a separate explicit step (POST /:id/accept) per ADR-032 review trigger.
+export async function handleSnapshot(args) {
+  const toolName = 'snapshot';
+  const requestId = `${toolName}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  const startTime = Date.now();
+
+  structuredLog.info(`${toolName}: starting`, {
+    tool_name: toolName,
+    request_id: requestId
+  });
+
+  try {
+    const topic = (args.topic || '').trim();
+
+    if (!topic) {
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ Missing required field: topic\n\nUsage: snapshot(topic: "architecture")`
+        }]
+      };
+    }
+    if (topic.length > 200) {
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ Topic too long (${topic.length} chars, max 200)`
+        }]
+      };
+    }
+
+    const data = await makeApiCall('/api/v1/snapshots/', {
+      method: 'POST',
+      body: JSON.stringify({ topic }),
+    });
+
+    structuredLog.info(`${toolName}: completed`, {
+      tool_name: toolName,
+      request_id: requestId,
+      duration_ms: Date.now() - startTime,
+      snapshot_id: data.id,
+      topic,
+      version: data.version,
+      evidence_tier: data.evidenceTier ?? data.evidence_tier,
+    });
+
+    const tier = data.evidenceTier ?? data.evidence_tier ?? '?';
+    const grounded = data.groundedRatio ?? data.grounded_ratio;
+    const groundedStr = typeof grounded === 'number' ? grounded.toFixed(2) : '—';
+    const cited = data.cited_memory_count ?? '?';
+
+    return {
+      content: [{
+        type: 'text',
+        text: `✅ Snapshot DRAFTED!\n\n` +
+          `📎 Topic: ${topic}\n` +
+          `🔖 Version: ${data.version}\n` +
+          `📊 Evidence tier: ${tier}\n` +
+          `📏 Grounded ratio: ${groundedStr}\n` +
+          `🔗 Cited memories: ${cited}\n` +
+          `🆔 Snapshot ID: ${data.id}\n` +
+          `📝 Status: draft (review and explicitly accept to promote to canonical)\n\n` +
+          `${data.tier_reason ? `_${data.tier_reason}_\n\n` : ''}` +
+          `Next: review the snapshot content, then POST /api/v1/snapshots/${data.id}/accept to promote.`
+      }]
+    };
+
+  } catch (error) {
+    const errorMsg = safeErrorMessage(error);
+
+    structuredLog.error(`${toolName}: failed`, {
+      tool_name: toolName,
+      request_id: requestId,
+      duration_ms: Date.now() - startTime,
+      error_message: error.message,
+      error_type: error.constructor.name
+    });
+
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ Snapshot Error: ${errorMsg}\n\nIf no source memories matched the topic, try a different keyword or save more relevant memories first.`
+      }]
+    };
+  }
+}
+
 export async function handleDiscoverRelated(args) {
   const toolName = 'discover_related_conversations';
   const requestId = `${toolName}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
