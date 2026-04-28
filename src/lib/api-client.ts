@@ -127,6 +127,24 @@ export function safeErrorMessage(error) {
   if (error.message?.includes('API Error 401') || error.message?.includes('API Error 403')) {
     return 'Invalid or missing API key.\n\nOption 1 — Easy setup (opens browser):\n  npx purmemo-mcp setup\n\nOption 2 — Manual:\n  claude mcp remove purmemo\n  claude mcp add purmemo -e PURMEMO_API_KEY=your-key -- npx -y purmemo-mcp\n\nGet your key at: https://app.purmemo.ai';
   }
+  // Surface api-side detail messages on 4xx (404 / 422 / etc.) instead of
+  // hiding them behind the generic fallback. The api returns
+  //   { "detail": "<friendly user-facing message>" }
+  // for these cases — pull it out so the MCP user sees what actually went wrong.
+  const apiErrorMatch = error.message?.match(/^API Error (4\d\d):\s*(.*)$/s);
+  if (apiErrorMatch) {
+    const status = apiErrorMatch[1];
+    const body = apiErrorMatch[2];
+    try {
+      const parsed = JSON.parse(body);
+      if (typeof parsed?.detail === 'string') {
+        return parsed.detail;
+      }
+    } catch {
+      // body wasn't JSON — fall through
+    }
+    return `API Error ${status}: ${body.slice(0, 300)}`;
+  }
   return 'An error occurred while processing your request. Please try again.';
 }
 
