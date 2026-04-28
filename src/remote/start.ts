@@ -11,6 +11,7 @@ import { apiCircuitBreaker } from '../lib/api-client.js';
 import {
   handleSaveConversation,
   handleSaveArtifact,
+  handleCommit,
   handleGetUserContext,
   handleRunWorkflow,
   handleListWorkflows,
@@ -256,6 +257,7 @@ export async function startRemoteServer(ctx) {
       'list_workflows': handleListWorkflows,
       'save_conversation': handleSaveConversation, // local for tag preservation + validation parity
       'save_artifact': handleSaveArtifact,
+      'commit': handleCommit,
       'share_memory': handleShareMemory,
       'recall_public': handleRecallPublic,
       'get_public_memory': handleGetPublicMemory,

@@ -712,6 +712,115 @@ export async function handleSaveArtifact(args) {
   }
 }
 
+// ADR-032 / ADR-034: Commit a commitment-shaped artifact (PRD, ADR, spec, OKR).
+// Thin write primitive — no conversation_id is sent (INSERT-only, no upsert
+// collisions). Slash commands /prd, /decide, /spec, /commit call this.
+export async function handleCommit(args) {
+  const toolName = 'commit';
+  const requestId = `${toolName}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  const startTime = Date.now();
+
+  structuredLog.info(`${toolName}: starting`, {
+    tool_name: toolName,
+    request_id: requestId
+  });
+
+  try {
+    const title = args.title;
+    const rawContent = args.content || '';
+    const content = sanitizeUnicode(rawContent);
+    const commitmentType = args.commitment_type;
+    const keyResult = args.key_result;
+    const targetDate = args.target_date;
+
+    let rawTags = args.tags;
+    if (typeof rawTags === 'string') {
+      try { rawTags = JSON.parse(rawTags); } catch { rawTags = [rawTags]; }
+    }
+    const tags = [...(Array.isArray(rawTags) ? rawTags : []), 'commitment', commitmentType?.toLowerCase()].filter(Boolean);
+
+    const VALID_TYPES = ['PRD', 'ADR', 'spec', 'OKR', 'other'];
+    const missing = [];
+    if (!title) missing.push('title');
+    if (content.length < 100) missing.push(`content (${content.length} chars, minimum 100)`);
+    if (!commitmentType) missing.push('commitment_type');
+    else if (!VALID_TYPES.includes(commitmentType)) missing.push(`commitment_type (must be one of: ${VALID_TYPES.join(', ')})`);
+    if (targetDate && !/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) missing.push('target_date (must be YYYY-MM-DD)');
+    if (keyResult && keyResult.length > 2000) missing.push(`key_result (${keyResult.length} chars, max 2000)`);
+
+    if (missing.length > 0) {
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ Missing or invalid fields: ${missing.join(', ')}\n\nRequired: title, content (≥100 chars), commitment_type (PRD|ADR|spec|OKR|other).\nOptional: key_result (≤2000 chars), target_date (YYYY-MM-DD), tags.`
+        }]
+      };
+    }
+
+    const sessionId = readCurrentSessionId();
+    const payload = {
+      title,
+      content,
+      tags,
+      platform: PLATFORM,
+      commitment_type: commitmentType,
+      ...(keyResult && { key_result: keyResult }),
+      ...(targetDate && { target_date: targetDate }),
+      ...(sessionId && { session_id: sessionId }),
+      // INSERT-only — no conversation_id (per ADR-034 v2). Repeat /decide
+      // calls produce a new memory each time; supersede via recency.
+    };
+
+    const data = await makeApiCall('/api/v1/memories/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+
+    const memoryId = data.id || data.memory_id;
+
+    structuredLog.info(`${toolName}: completed`, {
+      tool_name: toolName,
+      request_id: requestId,
+      duration_ms: Date.now() - startTime,
+      memory_id: memoryId,
+      commitment_type: commitmentType,
+      char_count: content.length,
+    });
+
+    return {
+      content: [{
+        type: 'text',
+        text: `✅ Commitment SAVED!\n\n` +
+          `📎 Title: ${title}\n` +
+          `📦 Type: ${commitmentType}\n` +
+          (keyResult ? `🎯 Key result: ${keyResult}\n` : '') +
+          (targetDate ? `📅 Target date: ${targetDate}\n` : '') +
+          `📏 Size: ${content.length.toLocaleString()} characters\n` +
+          `🆔 Memory ID: ${memoryId}\n\n` +
+          `✓ Queryable via GET /api/v1/commitments/?type=${commitmentType}`
+      }]
+    };
+
+  } catch (error) {
+    const errorMsg = safeErrorMessage(error);
+
+    structuredLog.error(`${toolName}: failed`, {
+      tool_name: toolName,
+      request_id: requestId,
+      duration_ms: Date.now() - startTime,
+      error_message: error.message,
+      error_type: error.constructor.name
+    });
+
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ Commit Error: ${errorMsg}\n\nPlease try again or contact support if the issue persists.`
+      }]
+    };
+  }
+}
+
 export async function handleDiscoverRelated(args) {
   const toolName = 'discover_related_conversations';
   const requestId = `${toolName}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;

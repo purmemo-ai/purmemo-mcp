@@ -70,6 +70,7 @@ import {
   initHandlers,
   handleSaveConversation,
   handleSaveArtifact,
+  handleCommit,
   handleDiscoverRelated,
   handleRecallMemories,
   handleGetMemoryDetails,
@@ -406,6 +407,64 @@ is to preserve artifacts that would otherwise be lost or summarized. Minimum 100
         }
       },
       required: ['conversationId', 'title', 'type', 'content']
+    }
+  },
+  // ADR-032 / ADR-034: Commitment-shaped write primitive (PRD, ADR, spec, OKR).
+  {
+    name: 'commit',
+    annotations: {
+      title: 'Commit a Commitment-Shaped Artifact',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true
+    },
+    description: `Persist a commitment-shaped artifact (PRD, ADR, spec, OKR) as a memory with intent='commitment'.
+
+WHEN TO USE: This is the write primitive for /prd, /decide, /spec, /commit slash commands. Call after the artifact is fully drafted in the conversation. Send the COMPLETE artifact verbatim — do NOT summarize.
+
+INSERT-only. Each call creates a new memory; supersede prior versions by recency, never overwrite. No conversationId parameter (intentional — see ADR-034).
+
+QUERYABLE: GET /api/v1/commitments/?type=<type> returns all commitments of a given type, filterable by target_date and sorted by recency.
+
+EXAMPLES:
+- commit(title="ADR-035 - Foo - Bar - 2026-04-28", type="ADR", content="<full ADR markdown>", key_result="single-sentence chosen-option statement")
+- commit(title="PRD - Email verification flow", type="PRD", content="<full PRD>", target_date="2026-05-15")`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Title following the pattern "[Type]-NNN - [Project] - [Subject] - [Date]" for ADRs, or "[Project] - [Type] - [Feature]" for PRDs/specs.'
+        },
+        commitment_type: {
+          type: 'string',
+          enum: ['PRD', 'ADR', 'spec', 'OKR', 'other'],
+          description: 'The kind of commitment.'
+        },
+        content: {
+          type: 'string',
+          description: 'COMPLETE artifact content, verbatim — the full markdown body of the PRD/ADR/spec/OKR.',
+          minLength: 100
+        },
+        key_result: {
+          type: 'string',
+          description: 'Optional one-sentence concrete deliverable. What is true when this commitment is honored?',
+          maxLength: 2000
+        },
+        target_date: {
+          type: 'string',
+          description: 'Optional target date in YYYY-MM-DD format. Omit if no deadline.',
+          pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional tags for categorization. "commitment" and the lowercased commitment_type are added automatically.',
+          default: []
+        }
+      },
+      required: ['title', 'commitment_type', 'content']
     }
   },
   {
@@ -1437,6 +1496,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return withUpdateNotice(await handleSaveConversation(args));
     case 'save_artifact':
       return withUpdateNotice(await handleSaveArtifact(args));
+    case 'commit':
+      return withUpdateNotice(await handleCommit(args));
     case 'recall_memories':
       return withUpdateNotice(await handleRecallMemories(args));
     case 'get_memory_details':
