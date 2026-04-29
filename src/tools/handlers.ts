@@ -942,10 +942,11 @@ export async function handleAcceptSnapshot(args) {
 
   structuredLog.info(`${toolName}: starting`, { tool_name: toolName, request_id: requestId });
 
-  try {
-    const snapshotId = (args.snapshot_id || '').trim();
-    if (!snapshotId) return { content: [{ type: 'text', text: '❌ Missing required field: snapshot_id' }] };
+  // Declare outside try so catch can reference it in gate blocker message
+  const snapshotId = (args.snapshot_id || '').trim();
+  if (!snapshotId) return { content: [{ type: 'text', text: '❌ Missing required field: snapshot_id' }] };
 
+  try {
     const data = await makeApiCall(`/api/v1/snapshots/${snapshotId}/accept`, {
       method: 'POST',
       body: JSON.stringify({ force: args.force || false }),
@@ -953,7 +954,6 @@ export async function handleAcceptSnapshot(args) {
 
     structuredLog.info(`${toolName}: complete`, { tool_name: toolName, request_id: requestId, duration_ms: Date.now() - startTime });
 
-    // Gate blockers — 409 is handled as an error by makeApiCall, caught below
     return {
       content: [{
         type: 'text',
@@ -962,18 +962,25 @@ export async function handleAcceptSnapshot(args) {
     };
 
   } catch (error) {
-    // Surface gate_blockers from 409 in a readable way
+    // 409 gate blocker — parse raw error.message before safeErrorMessage flattens it
     const msg = error.message || '';
-    const is409 = msg.includes('409');
-    if (is409) {
+    if (msg.includes('API Error 409')) {
       try {
         const bodyMatch = msg.match(/API Error 409:\s*(.+)$/s);
         if (bodyMatch) {
           const parsed = JSON.parse(bodyMatch[1]);
-          const blockers = (parsed.gate_blockers || []).map(b => `- **${b.code}**: ${b.detail}`).join('\n');
-          return { content: [{ type: 'text', text: `⚠️ Snapshot requires review before promotion:\n\n${blockers}\n\nCall accept_snapshot(snapshot_id: "${snapshotId}", force: true) to approve and promote anyway.` }] };
+          const blockers = (parsed.gate_blockers || [])
+            .map(b => `- **${b.code}**: ${b.detail}`)
+            .join('\n');
+          const hint = parsed.hint || `Call accept_snapshot(snapshot_id: "${snapshotId}", force: true) to approve and promote anyway.`;
+          return {
+            content: [{
+              type: 'text',
+              text: `⚠️ Snapshot requires review before promotion:\n\n${blockers || '(no blockers listed)'}\n\n${hint}`
+            }]
+          };
         }
-      } catch { /* fall through */ }
+      } catch { /* fall through to generic error */ }
     }
     structuredLog.error(`${toolName}: failed`, { tool_name: toolName, request_id: requestId, error_message: error.message });
     return { content: [{ type: 'text', text: `❌ accept_snapshot error: ${safeErrorMessage(error)}` }] };
