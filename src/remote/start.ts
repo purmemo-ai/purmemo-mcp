@@ -19,7 +19,12 @@ import {
   handleShareMemory,
   handleRecallPublic,
   handleGetPublicMemory,
-  handleReportMemory
+  handleReportMemory,
+  handleGetAcknowledgedErrors,
+  handleSaveTestResult,
+  handleGetNextTask,
+  handleCompleteTask,
+  handleSaveInvestigation
 } from '../tools/handlers.js';
 import { handleGenerateHandoffBrief } from '../tools/handoff.js';
 
@@ -265,6 +270,11 @@ export async function startRemoteServer(ctx) {
       'get_public_memory': handleGetPublicMemory,
       'report_memory': handleReportMemory,
       'generate_handoff_brief': handleGenerateHandoffBrief,
+      'get_acknowledged_errors': handleGetAcknowledgedErrors,
+      'save_test_result': handleSaveTestResult,
+      'get_next_task': handleGetNextTask,
+      'complete_task': handleCompleteTask,
+      'save_investigation_result': handleSaveInvestigation,
     };
 
     const localHandler = localOnlyHandlers[toolName];
