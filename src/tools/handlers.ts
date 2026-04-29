@@ -7,7 +7,7 @@
  */
 
 import { structuredLog } from '../lib/logger.js';
-import { makeApiCall, sanitizeUnicode, safeErrorMessage } from '../lib/api-client.js';
+import { makeApiCall, sanitizeUnicode, safeErrorMessage, wafSafeBody } from '../lib/api-client.js';
 import {
   extractProjectContext,
   generateIntelligentTitle,
@@ -174,7 +174,7 @@ async function saveChunkedContent(content, title, tags = [], metadata = {}) {
 
     const partData = await makeApiCall('/api/v1/memories/', {
       method: 'POST',
-      body: JSON.stringify({
+      body: wafSafeBody({
         content: chunk,
         title: `${title} - Part ${partNumber}/${totalParts}`,
         tags: [...tags, 'chunked-conversation', `session:${sessionId}`],
@@ -213,7 +213,7 @@ async function saveChunkedContent(content, title, tags = [], metadata = {}) {
 
   const indexData = await makeApiCall('/api/v1/memories/', {
     method: 'POST',
-    body: JSON.stringify({
+    body: wafSafeBody({
       content: indexContent,
       title: `${title} - Index`,
       tags: [...tags, 'chunked-index', `session:${sessionId}`],
@@ -278,7 +278,7 @@ async function saveSingleContent(content, title, tags = [], metadata = {}) {
 
   const data = await makeApiCall('/api/v1/memories/', {
     method: 'POST',
-    body: JSON.stringify(payload)
+    body: wafSafeBody(payload)
   });
 
   const memoryId = data.id || data.memory_id;
@@ -660,7 +660,7 @@ export async function handleSaveArtifact(args) {
 
     const data = await makeApiCall('/api/v1/memories/', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: wafSafeBody(payload),
     });
 
     const memoryId = data.id || data.memory_id;
@@ -773,7 +773,7 @@ export async function handleCommit(args) {
 
     const data = await makeApiCall('/api/v1/memories/', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: wafSafeBody(payload),
     });
 
     const memoryId = data.id || data.memory_id;

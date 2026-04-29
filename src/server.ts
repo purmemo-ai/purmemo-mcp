@@ -644,11 +644,6 @@ If gate blockers exist (conflicts detected, tier downgrade, or first canonical),
           default: 10,
           description: 'Maximum number of memories to return'
         },
-        contentPreview: {
-          type: 'boolean',
-          default: true,
-          description: 'Include content preview in results'
-        },
         entity: {
           type: 'string',
           description: 'Filter by entity name (people, projects, technologies). Use when user asks about a specific person, project, or technology by name. Example: entity="Alice" finds only memories mentioning Alice. More precise than semantic search. Supports partial matching.'

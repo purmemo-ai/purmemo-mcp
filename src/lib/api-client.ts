@@ -198,6 +198,25 @@ export function sanitizeUnicode(text) {
 }
 
 // ============================================================================
+// WAF-Safe Memory Payload Encoding
+// ============================================================================
+
+/**
+ * Wraps a memory POST body so the `content` field is base64-encoded.
+ * Render's Cloudflare WAF pattern-matches SQL/HTML keywords in raw request bodies
+ * and returns a 403. Base64 encoding is opaque to the WAF; the backend decodes it
+ * when content_encoding === "base64".
+ */
+export function wafSafeBody(payload: Record<string, unknown>): string {
+  if (typeof payload.content !== 'string') return JSON.stringify(payload);
+  return JSON.stringify({
+    ...payload,
+    content: Buffer.from(payload.content, 'utf8').toString('base64'),
+    content_encoding: 'base64',
+  });
+}
+
+// ============================================================================
 // API Call with Circuit Breaker + Timeout
 // ============================================================================
 
