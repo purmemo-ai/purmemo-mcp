@@ -373,8 +373,37 @@ When the MCP path provides `content` directly, the backend cannot verify what th
 
 MCP path eliminates both Gemini calls per snapshot on the MCP surface. The LLM conflict detection pass is retained on `snapshot_sources` because it surfaces narrative conflicts Claude should know about before synthesizing, and its failure is already benign.
 
+### Synthesis instructions for Claude (MCP path)
+
+When Claude receives sources from `snapshot_sources`, it synthesizes using these rules:
+
+- **Recency dominates.** When sources conflict, the most recent `content_updated_at` wins. Surface the conflict explicitly — do not silently pick one.
+- **No hallucination.** Every concrete claim (file paths, version numbers, names, dates, decisions) must appear verbatim or by clear paraphrase in a cited source. If uncertain, hedge ("as of [date]", "appears to").
+- **Surface conflicts.** If `conflicts_detected` is non-empty, acknowledge the disagreements in the document. Don't paper over them.
+- **Format.** Clean markdown. H1 title `# Snapshot — {topic}`. 1-2 sentence lede. H2 sections emerging from content — not generic "Overview" or "Details". Prose over bullets. 400-1200 words.
+- **Session context counts.** Claude should use what it knows from the current conversation to resolve ambiguities in sources — this is the quality advantage over Gemini.
+- **Pass all cited_ids.** Use the full `cited_memory_ids` list from `snapshot_sources` — do not filter.
+
+### Gate blocker UX
+
+When `accept_snapshot` returns gate blockers (conflicts, tier downgrade, first canonical):
+
+- Present the blockers to the user clearly
+- Ask for explicit approval before calling `accept_snapshot(force: true)`
+- Do not auto-force — the review gate exists for correctness, not bureaucracy
+
+### When to use which tool
+
+| Situation | Tool |
+|---|---|
+| Inside Claude, generate + save a snapshot | `snapshot_sources` → synthesize → `save_snapshot` → `accept_snapshot` |
+| Inside Claude, read existing canonical | `get_snapshot` |
+| Frontend dashboard (no LLM in loop) | `snapshot` (Gemini path, unchanged) |
+| Quick single-call from MCP without synthesizing | `snapshot` (Gemini path, 60s timeout) |
+
 ### Risks
 
 - **Caller-provided content quality.** Claude may paraphrase or fill gaps. Claim verification (`grounded_ratio`) is the guard — same as Gemini path.
 - **Two paths to maintain.** Any change to conflict detection, tier classification, or versioning must work for both. Mitigated by keeping both paths behind the same persistence route — only the generation step diverges.
 - **`snapshot(topic)` tool ambiguity.** The existing tool now has an implicit surface assumption (Gemini path). Long-term it should be deprecated in favour of the explicit two-step MCP path. Phase 2 deprecation, not Phase 1.
+- **409 gate blocker parsing.** `safeErrorMessage` flattens raw error bodies — `accept_snapshot` must parse `error.message` directly before calling `safeErrorMessage`. Fixed 2026-04-29.
