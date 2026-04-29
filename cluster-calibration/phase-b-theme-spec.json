@@ -1,0 +1,71 @@
+{
+  "$schema_note": "Phase B output — theme taxonomy. Original plan (expand the enum) NOT NEEDED — the existing primary_intent enum is already well-populated. The real issue is cluster table staleness.",
+  "generated_at": "2026-04-29",
+  "user_scope": "chris@purmemo.ai",
+
+  "key_finding": {
+    "headline": "Existing intent taxonomy is sufficient — clusters are STALE not under-themed",
+    "evidence": {
+      "intent_distribution": {
+        "bug_fix": 721,
+        "feature": 488,
+        "planning": 200,
+        "testing": 190,
+        "documentation": 170,
+        "deployment": 112,
+        "research": 89,
+        "refactor": 75,
+        "design": 8,
+        "development": 3,
+        "ux_improvement": 1
+      },
+      "valid_theme_pairs_in_data": "30+ (project_name, intent) pairs with COUNT(*) >= 2",
+      "actual_theme_clusters_in_db": 2,
+      "diagnosis": "cluster table reflects an OLD regen run (probably pre-TS-port). Once Phase D fires regen, theme count jumps ~15x without any code change."
+    }
+  },
+
+  "taxonomy_decision": "KEEP existing primary_intent enum as-is. 11 values is already a good spread. No new intents proposed.",
+
+  "minor_refinements": [
+    {
+      "id": "R1",
+      "issue": "'development' (3) and 'feature' (488) overlap — 'development' is a generic catch-all that should be remapped to the more specific value during extraction.",
+      "fix": "In intelligence extraction prompt, remove 'development' as an option. Force the model to choose a specific work_category. Backfill 3 existing memories from 'development' → 'feature' or appropriate value."
+    },
+    {
+      "id": "R2",
+      "issue": "'ux_improvement' (1) is a one-off; 'design' (8) is barely populated. Either consolidate or leave alone.",
+      "fix": "Leave alone. Single-memory edge cases don't hurt clustering since HAVING COUNT(*) >= 2 filters them out."
+    },
+    {
+      "id": "R3",
+      "issue": "1,056 memories have empty clustering_hints={} — they get NO theme assignment, even though they have project_name.",
+      "fix": "Backfill via Gemini intelligence extraction (existing pipeline). NOT a clustering fix per se, but it will unlock ~30% more theme assignments. Owned by intelligence extractor, not regenerateClusters."
+    },
+    {
+      "id": "R4",
+      "issue": "Theme query uses `clustering_hints->>'primary_intent' IS NOT NULL` — but doesn't check work_category. work_category is more granular ('development', 'documentation', 'testing') and could be a SECONDARY theme dimension if user wants finer subdivision.",
+      "fix": "OPTIONAL — add work_category as a fallback dimension when primary_intent unavailable. Defer until after Phase D ships and we see the actual baseline."
+    }
+  ],
+
+  "what_phase_b_does_NOT_change": [
+    "The intent enum stays the same",
+    "The theme query logic stays the same (GROUP BY project_name + primary_intent, HAVING >= 2)",
+    "The depth=0 / parent_id=project structure stays the same",
+    "The label format ('{project} — {intent.replace(_, ' ')}') stays the same"
+  ],
+
+  "what_phase_d_will_do_for_themes": [
+    "Just running the existing regen function with the alias-normalized project names will produce ~30+ theme clusters automatically",
+    "Phase A's pūrmemo merger means themes like 'pūrmemo — bug fix' (currently 452) gain memories that were previously under 'Pūrmemo — bug fix' (would have been a separate theme but disappeared because Pūrmemo only had 15 memories total, threshold-filtered)",
+    "Cognitive Orchestrator merger means 'cognitive-orchestrator — bug_fix' (~22), 'feature' (~16), 'testing' (~15), 'documentation' (~14) themes ALL surface — currently 0 themes for COS MCP because the regen never re-ran"
+  ],
+
+  "next_steps": [
+    "Phase C — orphan rescue (1,278 memories with no project_name)",
+    "Phase D — translate Phase A spec into SQL migration; baseline theme generation comes free as a side effect",
+    "Phase E — sanity-check on Lawrence + Jasmin"
+  ]
+}

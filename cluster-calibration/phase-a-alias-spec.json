@@ -1,0 +1,593 @@
+{
+  "$schema_note": "Phase A output — canonical project identities + alias map. Dry-run only. No DB writes. User reviews before Phase D translation to migration.",
+  "generated_at": "2026-04-29",
+  "user_scope": "chris@purmemo.ai",
+  "input_distinct_project_names": 220,
+  "input_total_memories_with_project_name": 1874,
+
+  "canonicals": [
+
+    {
+      "canonical_name": "purmemo",
+      "display_name": "pūrmemo",
+      "rollup_parent": null,
+      "rationale": "Main flagship project. Three diacritic/case variants in raw data + 'PureMemo' single-cap variant. Sub-projects (chrome ext, backend, MCP) get their OWN canonical entry below with parent='purmemo' so the project-scope cluster structure stays intact and theme-level subdivision is preserved.",
+      "memory_count": 1184,
+      "aliases": [
+        {"raw": "pūrmemo", "cnt": 1163},
+        {"raw": "Pūrmemo", "cnt": 15},
+        {"raw": "purmemo", "cnt": 6}
+      ]
+    },
+
+    {
+      "canonical_name": "purmemo-chrome-extension",
+      "display_name": "purmemo — Chrome Extension",
+      "rollup_parent": "purmemo",
+      "rationale": "Sub-project of purmemo. Multiple casing variants. Note ambiguity: 'Chrome Extension Production' and 'Chrome Extension' (no purmemo prefix) MIGHT be different chrome extensions — flagged for user review.",
+      "memory_count": 8,
+      "aliases": [
+        {"raw": "Purmemo Chrome Extension", "cnt": 2},
+        {"raw": "Pūrmemo Chrome Extension", "cnt": 1},
+        {"raw": "Chrome-Extension-Production", "cnt": 2},
+        {"raw": "Chrome Extension Production", "cnt": 1},
+        {"raw": "Chrome Extension", "cnt": 1, "uncertain": true, "reason": "could be a generic/different chrome extension — needs disambiguation"},
+        {"raw": "Purmemo Extension", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "purmemo-mcp",
+      "display_name": "purmemo — MCP Server",
+      "rollup_parent": "purmemo",
+      "rationale": "Sub-project: the MCP server distribution of purmemo. Many casing/hyphen variants. Distinct from generic 'MCP' which is the meta-rollup.",
+      "memory_count": 17,
+      "aliases": [
+        {"raw": "Purmemo MCP", "cnt": 2},
+        {"raw": "Purmemo Mcp", "cnt": 2},
+        {"raw": "Purmemo-Mcp", "cnt": 2},
+        {"raw": "Purmemo MCP Local Server", "cnt": 2},
+        {"raw": "Puo-Memo-Mcp-Client", "cnt": 5},
+        {"raw": "Puo-Memo-Mcp", "cnt": 2},
+        {"raw": "Purmemo MCP Tools", "cnt": 1},
+        {"raw": "PUO Memo MCP Server", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "purmemo-backend",
+      "display_name": "purmemo — Backend",
+      "rollup_parent": "purmemo",
+      "rationale": "v1-mvp backend / purmemo-api. Hono TS migration tracks here. Q6 confirmed: V1 Mvp folds in.",
+      "memory_count": 7,
+      "aliases": [
+        {"raw": "Pūrmemo v1 MVP Backend", "cnt": 2},
+        {"raw": "V1 Mvp", "cnt": 2},
+        {"raw": "Pūrmemo v1 MVP", "cnt": 1},
+        {"raw": "Pūrmemo Backend", "cnt": 1},
+        {"raw": "Purmemo-Core", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "puo-memo-legacy",
+      "display_name": "PUO Memo (legacy name)",
+      "rollup_parent": "purmemo",
+      "rationale": "Pre-rebrand name. Group separately so historical memories stay accessible under their original label, but parent to purmemo so dashboard shows them together.",
+      "memory_count": 28,
+      "aliases": [
+        {"raw": "PUO Memo Platform", "cnt": 23},
+        {"raw": "PUO Memo Multi-Tenant Platform", "cnt": 2},
+        {"raw": "PUO Memo Clean Architecture", "cnt": 1},
+        {"raw": "PUO Memo ChatGPT Bridge", "cnt": 1},
+        {"raw": "PUO Memory System", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "cognitive-orchestrator",
+      "display_name": "Cognitive Orchestrator (COS)",
+      "rollup_parent": null,
+      "rationale": "Confirmed by user (Q1+Q2): COS MCP, Cognitive Orchestrator, CognitiveCompass, and Cosmo/CosMo all the same project. COS = Cognitive Orchestrator System. MCP variants are deployment surfaces of the same underlying project.",
+      "memory_count": 111,
+      "aliases": [
+        {"raw": "COS MCP", "cnt": 90},
+        {"raw": "Cognitive Orchestrator", "cnt": 14},
+        {"raw": "CognitiveCompass", "cnt": 1},
+        {"raw": "CognitiveCompass Orchestrator", "cnt": 1},
+        {"raw": "Cognitive-Orchestrator-Mcp", "cnt": 1},
+        {"raw": "Cosmo", "cnt": 1},
+        {"raw": "CosMo", "cnt": 1},
+        {"raw": "COS Hub", "cnt": 1},
+        {"raw": "COS Orchestrator", "cnt": 1},
+        {"raw": "Cognitive-Compass-Mcp", "cnt": 4}
+      ]
+    },
+
+    {
+      "canonical_name": "portfolio",
+      "display_name": "Portfolio",
+      "rollup_parent": null,
+      "rationale": "Personal portfolio site (chrisoladapo.com). Multiple naming variants over time.",
+      "memory_count": 36,
+      "aliases": [
+        {"raw": "Portfolio", "cnt": 31},
+        {"raw": "Chris Oladapo Portfolio", "cnt": 2},
+        {"raw": "Chris Oladapo's portfolio", "cnt": 1},
+        {"raw": "Chrisoladapo.Com Portfolio", "cnt": 1},
+        {"raw": "Clofolio", "cnt": 1},
+        {"raw": "DreamJob Portfolio", "cnt": 1, "uncertain": true, "reason": "could be different — confirm"}
+      ]
+    },
+
+    {
+      "canonical_name": "futureshift",
+      "display_name": "FutureShift",
+      "rollup_parent": null,
+      "memory_count": 31,
+      "aliases": [
+        {"raw": "FutureShift", "cnt": 30},
+        {"raw": "Futureshift-Ai", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "mcp-orchestrator",
+      "display_name": "MCP Orchestrator",
+      "rollup_parent": null,
+      "rationale": "Distinct from cognitive-orchestrator (which is broader). MCPOrchestrator (no space) and Mcp-Orchestrator are the same.",
+      "memory_count": 33,
+      "aliases": [
+        {"raw": "MCP Orchestrator", "cnt": 29},
+        {"raw": "Mcp-Orchestrator", "cnt": 2},
+        {"raw": "MCPOrchestrator", "cnt": 1},
+        {"raw": "MCP Orchestrator V3", "cnt": 1},
+        {"raw": "Orchestrator", "cnt": 1, "uncertain": true},
+        {"raw": "Orchestrator-GatherIntent", "cnt": 1, "uncertain": true, "reason": "likely belongs with Gather Intent or MCP Orchestrator"}
+      ]
+    },
+
+    {
+      "canonical_name": "krawlr-mcp",
+      "display_name": "Krawlr MCP Server",
+      "rollup_parent": null,
+      "rationale": "Q7 confirmed: LeadFinder is separate. 'Krawlr + LeadFinder' joint memories stay with krawlr (primary subject).",
+      "memory_count": 28,
+      "aliases": [
+        {"raw": "Krawlr MCP Server", "cnt": 26},
+        {"raw": "Krawlr + LeadFinder", "cnt": 2}
+      ]
+    },
+
+    {
+      "canonical_name": "leadfinder",
+      "display_name": "LeadFinder",
+      "rollup_parent": null,
+      "rationale": "Q7: Own project, separate from Krawlr.",
+      "memory_count": 1,
+      "aliases": [
+        {"raw": "LeadFinder", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "mental-models",
+      "display_name": "Mental Models Platform",
+      "rollup_parent": null,
+      "rationale": "Mental Models MCP and Mental-Models-Platform clearly the same. 'Mental Models MCP Platform' and 'MCP Mental Models' likely same.",
+      "memory_count": 31,
+      "aliases": [
+        {"raw": "Mental Models Platform", "cnt": 26},
+        {"raw": "Mental Models MCP", "cnt": 2},
+        {"raw": "Mental-Models-Platform", "cnt": 2},
+        {"raw": "Mental Models MCP Platform", "cnt": 1},
+        {"raw": "MCP Mental Models", "cnt": 1, "uncertain": true}
+      ]
+    },
+
+    {
+      "canonical_name": "voiceflow",
+      "display_name": "VoiceFlow",
+      "rollup_parent": null,
+      "memory_count": 24,
+      "aliases": [
+        {"raw": "VoiceFlow", "cnt": 24}
+      ]
+    },
+
+    {
+      "canonical_name": "nuthn",
+      "display_name": "Nuthn",
+      "rollup_parent": null,
+      "memory_count": 21,
+      "aliases": [
+        {"raw": "Nuthn", "cnt": 21}
+      ]
+    },
+
+    {
+      "canonical_name": "domestika-downloader",
+      "display_name": "Domestika Downloader",
+      "rollup_parent": null,
+      "rationale": "Confirmed by user (Q3): Emeritus-Downloader is a separate sibling project, kept as its own canonical below.",
+      "memory_count": 21,
+      "aliases": [
+        {"raw": "Domestika-Downloader", "cnt": 20},
+        {"raw": "Domestika Downloader", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "emeritus-downloader",
+      "display_name": "Emeritus Downloader",
+      "rollup_parent": null,
+      "rationale": "Sibling of Domestika Downloader (Q3). Single-memory project but kept as own canonical to preserve identity.",
+      "memory_count": 1,
+      "aliases": [
+        {"raw": "Emeritus-Downloader", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "puremail",
+      "display_name": "Pūremail",
+      "rollup_parent": null,
+      "memory_count": 19,
+      "aliases": [
+        {"raw": "Pūremail", "cnt": 19}
+      ]
+    },
+
+    {
+      "canonical_name": "clo-lean",
+      "display_name": "Clo / Lean",
+      "rollup_parent": null,
+      "memory_count": 18,
+      "aliases": [
+        {"raw": "Clo / Lean", "cnt": 18}
+      ]
+    },
+
+    {
+      "canonical_name": "context7-mcp",
+      "display_name": "Context7 MCP",
+      "rollup_parent": null,
+      "memory_count": 15,
+      "aliases": [
+        {"raw": "Context7 MCP", "cnt": 15}
+      ]
+    },
+
+    {
+      "canonical_name": "wealthincome",
+      "display_name": "WealthIncome",
+      "rollup_parent": null,
+      "memory_count": 15,
+      "aliases": [
+        {"raw": "WealthIncome", "cnt": 11},
+        {"raw": "WealthIncome AI System", "cnt": 1},
+        {"raw": "Wealthincome AI System", "cnt": 1},
+        {"raw": "Wealthincome Financial Tracker", "cnt": 1},
+        {"raw": "WealthIncome Platform", "cnt": 1},
+        {"raw": "WealthIncome Unified Trading Platform", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "creative-copilot",
+      "display_name": "Creative Copilot",
+      "rollup_parent": null,
+      "memory_count": 12,
+      "aliases": [
+        {"raw": "Creative Copilot", "cnt": 10},
+        {"raw": "Creative-Copilot-Integration", "cnt": 1},
+        {"raw": "Personal-Creative-Copilot", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "librarian-mcp",
+      "display_name": "Librarian MCP",
+      "rollup_parent": null,
+      "memory_count": 12,
+      "aliases": [
+        {"raw": "Librarian MCP", "cnt": 10},
+        {"raw": "Librarian", "cnt": 2}
+      ]
+    },
+
+    {
+      "canonical_name": "desktop-commander-mcp",
+      "display_name": "Desktop Commander MCP",
+      "rollup_parent": null,
+      "rationale": "Q5 demoted Claude Desktop itself, but Desktop Commander MCP is a real third-party MCP server — keep as own canonical.",
+      "memory_count": 2,
+      "aliases": [
+        {"raw": "Desktop Commander MCP", "cnt": 1},
+        {"raw": "DesktopCommanderMCP", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "usertesting-mcp",
+      "display_name": "UserTesting MCP",
+      "rollup_parent": null,
+      "rationale": "Casing dupes. Both 'UserTesting MCP' and 'Usertesting-Mcp' are the same project.",
+      "memory_count": 9,
+      "aliases": [
+        {"raw": "Usertesting-Mcp", "cnt": 5},
+        {"raw": "UserTesting MCP", "cnt": 4}
+      ]
+    },
+
+    {
+      "canonical_name": "meta-mcp",
+      "display_name": "Meta-MCP",
+      "rollup_parent": null,
+      "memory_count": 5,
+      "aliases": [
+        {"raw": "Meta-MCP", "cnt": 4},
+        {"raw": "Meta-MCP Ecosystem", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "dollavote",
+      "display_name": "DollaVote",
+      "rollup_parent": null,
+      "memory_count": 4,
+      "aliases": [
+        {"raw": "Dollavote", "cnt": 3},
+        {"raw": "DollaVote", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "figma-bridge-mcp",
+      "display_name": "Figma Bridge MCP",
+      "rollup_parent": null,
+      "memory_count": 4,
+      "aliases": [
+        {"raw": "Figma Bridge MCP", "cnt": 3},
+        {"raw": "Figma-Bridge-Mcp", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "figma-design-automation",
+      "display_name": "Figma Design Automation Plugin",
+      "rollup_parent": null,
+      "memory_count": 4,
+      "aliases": [
+        {"raw": "Figma-Design-Automation-Plugin", "cnt": 3},
+        {"raw": "Figma Design Automation Plugin", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "inbox-zero-mcp",
+      "display_name": "Inbox Zero MCP",
+      "rollup_parent": null,
+      "memory_count": 5,
+      "aliases": [
+        {"raw": "Inbox Zero MCP", "cnt": 3},
+        {"raw": "Inbox-Zero-Mcp", "cnt": 2}
+      ]
+    },
+
+    {
+      "canonical_name": "intent-bridge-mcp",
+      "display_name": "Intent Bridge MCP",
+      "rollup_parent": null,
+      "memory_count": 4,
+      "aliases": [
+        {"raw": "Intent Bridge MCP", "cnt": 3},
+        {"raw": "Intent Bridge MCP Server", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "gather-intent-mcp",
+      "display_name": "Gather Intent MCP",
+      "rollup_parent": null,
+      "memory_count": 4,
+      "aliases": [
+        {"raw": "Gather Intent MCP", "cnt": 2},
+        {"raw": "Gather Intent", "cnt": 1},
+        {"raw": "Gather-Intent-Mcp", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "handoff-mcp",
+      "display_name": "Handoff MCP",
+      "rollup_parent": null,
+      "memory_count": 4,
+      "aliases": [
+        {"raw": "Handoff-Mcp", "cnt": 2},
+        {"raw": "handoff MCP", "cnt": 1},
+        {"raw": "Handoff-v2 Unified", "cnt": 1, "uncertain": true}
+      ]
+    },
+
+    {
+      "canonical_name": "figma-mcp",
+      "display_name": "Figma MCP",
+      "rollup_parent": null,
+      "memory_count": 6,
+      "aliases": [
+        {"raw": "Figma MCP", "cnt": 2},
+        {"raw": "MCP Figma", "cnt": 2},
+        {"raw": "Mcp-Figma", "cnt": 1},
+        {"raw": "figma-redis MCP", "cnt": 1, "uncertain": true}
+      ]
+    },
+
+    {
+      "canonical_name": "raid-mcp",
+      "display_name": "RAID MCP",
+      "rollup_parent": null,
+      "memory_count": 3,
+      "aliases": [
+        {"raw": "Raid Mcp", "cnt": 1},
+        {"raw": "RAID mcp", "cnt": 1},
+        {"raw": "Raid-C", "cnt": 1, "uncertain": true}
+      ]
+    },
+
+    {
+      "canonical_name": "email-extractor",
+      "display_name": "Email Extractor",
+      "rollup_parent": null,
+      "memory_count": 2,
+      "aliases": [
+        {"raw": "Email Extractor", "cnt": 1},
+        {"raw": "Email-Extractor", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "ecommerce-platform",
+      "display_name": "E-commerce Platform",
+      "rollup_parent": null,
+      "memory_count": 3,
+      "aliases": [
+        {"raw": "E-commerce Platform", "cnt": 2},
+        {"raw": "E-Commerce Platform", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "herbae-method",
+      "display_name": "The Herbaē Method",
+      "rollup_parent": null,
+      "memory_count": 2,
+      "aliases": [
+        {"raw": "The Herbaē Method", "cnt": 1},
+        {"raw": "The Herbaē Method Website", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "onlook",
+      "display_name": "Onlook",
+      "rollup_parent": null,
+      "memory_count": 2,
+      "aliases": [
+        {"raw": "Onlook", "cnt": 1},
+        {"raw": "Onlook Visual Editor", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "slauson",
+      "display_name": "Slauson",
+      "rollup_parent": null,
+      "memory_count": 2,
+      "aliases": [
+        {"raw": "Slauson", "cnt": 1},
+        {"raw": "Slauson Prep", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "symphony",
+      "display_name": "Symphony",
+      "rollup_parent": null,
+      "memory_count": 4,
+      "aliases": [
+        {"raw": "Symphony MCP", "cnt": 2},
+        {"raw": "Symphony Autonomy", "cnt": 1},
+        {"raw": "Symphony v2", "cnt": 1}
+      ]
+    },
+
+    {
+      "canonical_name": "sequential-thinking-mcp",
+      "display_name": "Sequential Thinking MCP",
+      "rollup_parent": null,
+      "memory_count": 2,
+      "aliases": [
+        {"raw": "Sequential Thinking MCP", "cnt": 1},
+        {"raw": "Sequential Thinking MCP Server", "cnt": 1}
+      ]
+    },
+
+    {
+      "_note": "Q4: NO MCP rollup parent cluster. User decision: many projects ARE MCP servers or have MCP deployments — a flat 'MCP Servers' meta-cluster would over-collapse identity. All MCP-named canonicals stay as flat siblings."
+    }
+
+  ],
+
+  "single_unique_projects_kept_as_is": [
+    "Aqua Voice", "Atomic Actions Mcp", "Anime Tracking System", "App Store",
+    "Apple App Store", "Browser MCP", "Chrome Extension Gemini", "Codex CLI",
+    "Knowledge Graph Memory Server", "Demo Mcp Server", "Demo Python Server MCP Server",
+    "Eco Water Bottle Launch", "Email Freedom MCP", "Figma Make", "Figma Plugin",
+    "Filesystem MCP Server", "Food Delivery App", "Fullstack-App", "Gamma",
+    "History Education Web Scraping System", "Hn_Clone", "Image Dithering Tool",
+    "Immich", "Intelligent-Memory.Js", "Intent Capture Framework", "MCP Gateway",
+    "MCP Integration Architecture", "MCP Intelligence Layer", "MCP Recall Tool",
+    "MCP Servers", "Mcp-Installer", "Mcp-Server-Git", "ModelPlayground",
+    "Notification Service", "Payment System", "Project Alpha", "Project X",
+    "Project Y", "PUO AI Jobber", "PUO AI Studio", "PUO Unified Memory",
+    "Pūrview", "Remote", "Remote MCP", "Render MCP", "SaaS Accounting Product",
+    "Scheduler Stendig Calendar", "ShopFlow", "Shopping cart", "Social Media API",
+    "Supabase MCP", "TaskFlow", "TaskMaster Pro", "Time MCP Server",
+    "Todo Application", "Tool Discovery and Search System", "Universe-City",
+    "Vision MCP", "Weather Tool MCP Server", "MCP Server", "AI Code Review Assistant",
+    "Bfg-Report", "Calculator Mcp MCP Server", "Claude Code Visual Bridge",
+    "Model Context Protocol"
+  ],
+
+  "garbage_to_demote_or_orphan": {
+    "rationale": "These are NOT real projects — they are tools, generic words, or noise. SQL clustering should EXCLUDE these from project-scope clusters and reassign their memories to the General bucket OR to a more appropriate project via Phase C orphan rescue. Q5 confirmed: Claude Code / Claude Desktop / Cursor demoted — they are tools, not projects.",
+    "values": [
+      "Ai", "Architecture", "Bcrypt", "Chatgpt", "Chrome Extension",
+      "Claude Code", "Claude Desktop", "Claude Desktop Commander", "Cloudwatch",
+      "Cursor", "Cursor-Mcp", "Day", "Dia", "Dom", "Dry", "Enter", "Figma",
+      "Get", "Ides", "Improvement", "Insight", "Issues", "Linkedin", "Mcp",
+      "Mem", "Openai", "Project Alpha", "Project X", "Project Y", "Rag",
+      "Reddit", "Scripts", "Src", "V0", "Vllm", "Zapier"
+    ]
+  },
+
+  "user_decisions_resolved": {
+    "Q1_cognitive_orchestrator_eq_cos": "YES — merged into single canonical 'cognitive-orchestrator' (111 memories)",
+    "Q2_cosmo_is_project": "YES — Cosmo/CosMo merged into cognitive-orchestrator",
+    "Q3_domestika_emeritus": "SIBLINGS — kept as separate canonicals",
+    "Q4_mcp_rollup_parent": "NO — many projects are MCP or have MCP deployments; flat structure preserved",
+    "Q5_demote_tools": "YES — Claude Code, Claude Desktop, Cursor demoted to garbage list",
+    "Q6_v1_mvp_to_backend": "YES — V1 Mvp merged into purmemo-backend",
+    "Q7_leadfinder": "OWN PROJECT — separate canonical 'leadfinder', not merged into krawlr"
+  },
+
+  "estimated_impact_if_applied": {
+    "raw_distinct_project_names": 220,
+    "canonical_count_after_merge": 39,
+    "single_unique_kept_as_is": 64,
+    "garbage_demoted": 36,
+    "memories_recovered_into_real_clusters": "~85 (case-merged variants that today fall below the COUNT >= 3 threshold and disappear)",
+    "biggest_consolidations": [
+      "cognitive-orchestrator: 10 variants → 1 (COS MCP + Cognitive Orchestrator + CognitiveCompass + Cosmo/CosMo + Cognitive-Compass-Mcp = 111 memories under one project)",
+      "purmemo: 3 casing variants → 1 (+21 memories to flagship, plus 4 sub-projects with parent_id set)",
+      "WealthIncome: 6 variants → 1",
+      "Portfolio: 5 variants → 1",
+      "PUO Memo legacy: 5 variants → 1 (parent: purmemo)",
+      "Mental Models: 4 variants → 1",
+      "MCP Orchestrator: 4 variants → 1",
+      "purmemo-mcp: 8 variants → 1",
+      "purmemo-backend: 5 variants → 1 (incl. V1 Mvp per Q6)",
+      "Symphony: 3 variants → 1",
+      "Cognitive Orchestrator family (final): 10 → 1"
+    ]
+  },
+
+  "next_steps": [
+    "Q1-Q7 RESOLVED — spec finalized",
+    "Phase B — theme taxonomy expansion against the canonical projects",
+    "Phase C — orphan rescue (1,278 memories with no project_name)",
+    "Phase D — translate spec into SQL migration: project_aliases table + normalization function + dry-run diff per change",
+    "Phase E — sanity-check on Lawrence + Jasmin accounts"
+  ]
+}

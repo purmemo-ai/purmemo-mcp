@@ -1,0 +1,262 @@
+{
+  "$schema_note": "Phase C output — orphan rescue spec. Reassigns 1,278 memories with no project_name to canonical projects via title-pattern + technologies signal matching. Dry-run only — no DB writes.",
+  "generated_at": "2026-04-29",
+  "user_scope": "chris@purmemo.ai",
+  "total_orphans": 1278,
+
+  "headline_finding": {
+    "claim": "Most orphans are not actually orphans — they are real project work whose project_name was never extracted by the intelligence pipeline. Title-pattern rescue alone covers ~70% of orphans without needing any LLM.",
+    "evidence": "Of 1,278 orphans, 1,254 have a title (98%). Sampled 50 most-recent: ~80% had a project name embedded directly in the title (e.g. 'Purmemo - ADR-032 ...', 'Portfolio - Doc Scanner ...', 'Wing MCP - Sprint 7 ...').",
+    "implication": "A normalization function in SQL — `normalize_project_name(title, content_hint)` — can rescue orphans deterministically. Reserve LLM (Claude/Gemini) only for the residual ~30% where signals are weak."
+  },
+
+  "discoveries_added_to_phase_a_canonicals": [
+    {
+      "canonical_name": "kanvo",
+      "display_name": "Kanvo",
+      "rationale": "25 orphans match. Real project per MEMORY.md (agent-native visual canvas, /diagram skill, AGENTS.md updated). Was missing from Phase A because zero memories had project_name='Kanvo'.",
+      "rescued_orphans_estimate": 25,
+      "title_match_pattern": "LOWER(title) LIKE '%kanvo%'"
+    },
+    {
+      "canonical_name": "purmemo-amp",
+      "display_name": "purmemo — AMP (macOS App)",
+      "rollup_parent": "purmemo",
+      "rationale": "18 orphans match. macOS Swift menu bar app, AI Memory Processor, owns SemanticExtractor + CLIRunner. Sub-project of purmemo per MEMORY.md.",
+      "rescued_orphans_estimate": 18,
+      "title_match_pattern": "LOWER(title) LIKE '%purmemo amp%' OR LOWER(title) LIKE 'purmemoamp%' OR LOWER(title) LIKE 'amp %' OR LOWER(title) LIKE 'purmemo-amp%'"
+    },
+    {
+      "canonical_name": "wing-mcp",
+      "display_name": "Wing MCP",
+      "rationale": "6 orphans match. Flight/award travel MCP. Real project (sprint planning, strategy pivot memories).",
+      "rescued_orphans_estimate": 6,
+      "title_match_pattern": "LOWER(title) LIKE '%wing mcp%' OR LOWER(title) LIKE 'wing —%'"
+    },
+    {
+      "canonical_name": "openclaw",
+      "display_name": "OpenClaw",
+      "rationale": "4 orphans, all research/architecture deconstruction memories.",
+      "rescued_orphans_estimate": 4,
+      "title_match_pattern": "LOWER(title) LIKE '%openclaw%'"
+    },
+    {
+      "canonical_name": "kiru",
+      "display_name": "Kiru / watchlist",
+      "rationale": "2 orphans. Anime recommendation engine.",
+      "rescued_orphans_estimate": 2,
+      "title_match_pattern": "LOWER(title) LIKE '%kiru%' OR LOWER(title) LIKE 'watchlist%'"
+    }
+  ],
+
+  "rescue_rules_deterministic": {
+    "rationale": "Run BEFORE any LLM call. Each rule applies only if title/content matches the pattern AND project_name is currently NULL. Order matters — earlier rules win.",
+    "rules": [
+      {
+        "id": "RULE-1-purmemo-strong",
+        "target_canonical": "purmemo",
+        "pattern": "LOWER(title) LIKE '%purmemo%' OR LOWER(title) LIKE '%pūrmemo%' OR LOWER(title) LIKE '%puremem%' OR LOWER(title) LIKE '%puo memo%' OR LOWER(title) LIKE 'adr-%'",
+        "estimated_matches": 482,
+        "confidence": "high",
+        "notes": "ADR-* prefix is purmemo-specific (we're the only ones writing ADRs in this dataset). Verified in 30-row sample — all ADR-* matches were purmemo work."
+      },
+      {
+        "id": "RULE-2-clo-lean",
+        "target_canonical": "clo-lean",
+        "pattern": "LOWER(title) LIKE '%clo / lean%' OR LOWER(title) LIKE 'clo lean%' OR LOWER(title) LIKE '%clo —%' OR LOWER(title) LIKE 'lean —%'",
+        "estimated_matches": 54,
+        "confidence": "high"
+      },
+      {
+        "id": "RULE-3-portfolio",
+        "target_canonical": "portfolio",
+        "pattern": "LOWER(title) LIKE '%portfolio%' OR LOWER(title) LIKE 'doc scanner%' OR LOWER(title) LIKE 'clofolio%' OR LOWER(title) LIKE 'dreamjob%'",
+        "estimated_matches": 40,
+        "confidence": "high",
+        "notes": "Includes 'Doc Scanner' which is the patent slide series for the portfolio project."
+      },
+      {
+        "id": "RULE-4-krawlr",
+        "target_canonical": "krawlr-mcp",
+        "pattern": "LOWER(title) LIKE '%krawlr%'",
+        "estimated_matches": 33,
+        "confidence": "high"
+      },
+      {
+        "id": "RULE-5-puremail",
+        "target_canonical": "puremail",
+        "pattern": "LOWER(title) LIKE '%puremail%' OR LOWER(title) LIKE '%pūremail%'",
+        "estimated_matches": 31,
+        "confidence": "high"
+      },
+      {
+        "id": "RULE-6-kanvo",
+        "target_canonical": "kanvo",
+        "pattern": "LOWER(title) LIKE '%kanvo%'",
+        "estimated_matches": 25,
+        "confidence": "high"
+      },
+      {
+        "id": "RULE-7-purmemo-amp",
+        "target_canonical": "purmemo-amp",
+        "pattern": "LOWER(title) LIKE '%purmemo amp%' OR LOWER(title) LIKE 'purmemoamp%' OR LOWER(title) LIKE 'purmemo-amp%' OR (LOWER(title) LIKE 'amp %' AND LOWER(content) LIKE '%semantic%')",
+        "estimated_matches": 18,
+        "confidence": "high",
+        "notes": "Bare 'AMP X' pattern requires content sanity check (looks for 'semantic' which is in most AMP memories) to avoid hijacking unrelated 'AMP' titles."
+      },
+      {
+        "id": "RULE-8-futureshift",
+        "target_canonical": "futureshift",
+        "pattern": "LOWER(title) LIKE '%futureshift%'",
+        "estimated_matches": 16,
+        "confidence": "high"
+      },
+      {
+        "id": "RULE-9-wealthincome",
+        "target_canonical": "wealthincome",
+        "pattern": "LOWER(title) LIKE '%wealthincome%'",
+        "estimated_matches": 7,
+        "confidence": "high"
+      },
+      {
+        "id": "RULE-10-wing-mcp",
+        "target_canonical": "wing-mcp",
+        "pattern": "LOWER(title) LIKE '%wing mcp%' OR LOWER(title) LIKE 'wing —%'",
+        "estimated_matches": 6,
+        "confidence": "high"
+      },
+      {
+        "id": "RULE-11-openclaw",
+        "target_canonical": "openclaw",
+        "pattern": "LOWER(title) LIKE '%openclaw%'",
+        "estimated_matches": 4,
+        "confidence": "high"
+      },
+      {
+        "id": "RULE-12-kiru",
+        "target_canonical": "kiru",
+        "pattern": "LOWER(title) LIKE '%kiru%' OR LOWER(title) LIKE 'watchlist%'",
+        "estimated_matches": 2,
+        "confidence": "high"
+      },
+      {
+        "id": "RULE-13-domestika",
+        "target_canonical": "domestika-downloader",
+        "pattern": "LOWER(title) LIKE '%domestika%'",
+        "estimated_matches": 1,
+        "confidence": "high"
+      },
+      {
+        "id": "RULE-14-emeritus",
+        "target_canonical": "emeritus-downloader",
+        "pattern": "LOWER(title) LIKE '%emeritus%'",
+        "estimated_matches": 0,
+        "confidence": "high",
+        "notes": "Listed for completeness — no orphan matches but rule applies if future memories appear."
+      },
+      {
+        "id": "RULE-15-librarian",
+        "target_canonical": "librarian-mcp",
+        "pattern": "LOWER(title) LIKE '%librarian%'",
+        "estimated_matches": 1,
+        "confidence": "high"
+      }
+    ],
+    "estimated_total_rescued_by_deterministic_rules": 720
+  },
+
+  "consumed_content_bucket": {
+    "rationale": "Some orphans are saved articles, podcasts, social posts, jobs, videos — NOT project work. They naturally cluster as 'consumed content / inspiration' rather than projects. Today they all dump into the unspecific 'General' bucket. Recommend creating a SEPARATE non-project cluster type 'inspiration' that doesn't pollute the General bucket and isn't a project.",
+    "estimated_size": "200-300 memories (51 caught by sampled patterns + many that didn't match my naive heuristics)",
+    "patterns_to_route_here": [
+      "LOWER(title) LIKE '%— %' AND content_length < 3000 AND title contains a known site/platform/podcast name",
+      "LOWER(title) LIKE 'youtube%' OR title LIKE '%youtube.com%'",
+      "LOWER(title) LIKE 'instagram%' OR title LIKE '%instagram.com%'",
+      "LOWER(title) LIKE 'threads%' OR title LIKE '%/threads%'",
+      "LOWER(title) LIKE 'twitter%' OR LOWER(title) LIKE '%on x%'",
+      "LOWER(title) LIKE '%podcast%'",
+      "LOWER(title) LIKE 'ibm technology%' OR 'cole medin%' OR 'lenny%' OR 'no priors%' OR 'jeredblu%' (creator-prefixed videos)",
+      "LOWER(title) LIKE '%hiring%' AND content contains location",
+      "LOWER(title) LIKE '%linkedin%'"
+    ],
+    "scope_decision_required": "Should we (a) treat this as an 'inspiration' SCOPE ALONGSIDE 'project' and 'theme'? Or (b) just dump these into the General bucket with proper labeling? Recommend (a) so they navigate separately on the constellation."
+  },
+
+  "personal_life_buckets": {
+    "rationale": "Spotted in sample: Taxes 2025 (1), Japan trip planning (1), Dropbox patent IP analysis (1), Gensler/Courtenay networking (1), Superhuman interview prep (1), Anthropic/Yahoo job memories. These aren't projects but aren't 'consumed content' either — they're personal life/career work.",
+    "proposed_canonical_groups": [
+      {"canonical_name": "career-jobs", "rationale": "Job applications, interview prep, career conversations", "estimated_size": "10-30"},
+      {"canonical_name": "personal-finance", "rationale": "Taxes, financial accounts", "estimated_size": "5-15"},
+      {"canonical_name": "personal-travel", "rationale": "Trip planning, travel logistics", "estimated_size": "2-10"},
+      {"canonical_name": "ip-legal", "rationale": "Patent research, legal/IP analysis", "estimated_size": "2-10"}
+    ],
+    "decision_required": "Confirm whether to create these or leave them in General. Personal-life memories may not deserve project clusters."
+  },
+
+  "garbage_to_drop": {
+    "rationale": "Don't cluster these at all. Either delete or send to a 'noise' bucket.",
+    "patterns": [
+      "LOWER(title) LIKE 'smoke test%'",
+      "LOWER(title) LIKE 'untitled' AND content_length < 100",
+      "title IS NULL AND content_length < 100",
+      "LOWER(title) LIKE '%plumbing test%' AND content_length < 1000"
+    ],
+    "estimated_matches": 5
+  },
+
+  "residual_for_llm_pass": {
+    "rationale": "After all deterministic rules + consumed-content + personal-life buckets, remaining orphans need an LLM judgment call. Estimate ~250-350 memories.",
+    "approach": "Batch into chunks of 50 with title + 200-char content preview. Hand to Claude (or Gemini via existing intelligence extractor). For each: (a) match to canonical project, (b) propose new canonical, (c) mark as truly general/inspiration/personal.",
+    "prompt_strategy": "Conservative — bias toward 'general' over inventing new canonicals. Only return a project name if confidence > 0.7. New canonicals require >= 3 supporting memories.",
+    "estimated_tokens": "~50k tokens total (5-7 batched calls)"
+  },
+
+  "estimated_impact": {
+    "before": {
+      "total_memories": 3152,
+      "memories_in_project_clusters": 1874,
+      "orphans_in_general_bucket": 1278,
+      "general_bucket_pct": "40.5%"
+    },
+    "after_deterministic_rules_only": {
+      "memories_in_project_clusters": 2594,
+      "orphans_in_general_bucket": 558,
+      "general_bucket_pct": "17.7%",
+      "improvement": "rescued 720 memories from General into named projects"
+    },
+    "after_consumed_content_split": {
+      "memories_in_project_clusters": 2594,
+      "memories_in_inspiration_bucket": "~250",
+      "memories_in_general_bucket": "~308",
+      "general_bucket_pct": "9.8%"
+    },
+    "after_residual_llm_pass": {
+      "memories_in_project_clusters": "~2750",
+      "memories_in_inspiration_bucket": "~250",
+      "memories_in_general_bucket": "~150",
+      "general_bucket_pct": "4.8%",
+      "headline": "From 40% orphan rate to <5%. Most rescue is FREE (deterministic SQL); LLM only handles the long tail."
+    }
+  },
+
+  "structural_changes_to_admin_ts": {
+    "no_schema_breakage": "All changes are ADDITIVE to regenerateClusters logic. Schema unchanged. scope='project'/'theme' unchanged. depth=-1/0 unchanged.",
+    "summary": [
+      "1. ADD project_aliases table (Phase D) — maps raw project_name to canonical_name",
+      "2. ADD a normalize_project_name(title) function — applies RULE-1 through RULE-15",
+      "3. MODIFY regenerateClusters Level 1 query — first JOIN through aliases for normalization, then GROUP BY canonical_name",
+      "4. ADD a step BEFORE Level 1 — for memories with project_name IS NULL, run normalize_project_name(title) and treat that as their effective project for clustering (does NOT modify the memory row, just affects cluster assignment)",
+      "5. (OPTIONAL) ADD scope='inspiration' for consumed-content cluster — separate from General bucket",
+      "6. KEEP General bucket as final fallback (much smaller, ~150 memories)",
+      "7. KEEP favorites/archives snapshot+restore (already correct)"
+    ]
+  },
+
+  "next_steps": [
+    "User review of rescue rules — flag any false positives (e.g. is 'AMP X' pattern in RULE-7 too aggressive?)",
+    "User decision on consumed-content bucket — separate scope or stay in General?",
+    "User decision on personal-life canonicals — career-jobs, personal-finance, etc.",
+    "Phase D — translate Phase A + Phase C into one SQL migration with dry-run diff",
+    "Phase E — sanity-check on Lawrence + Jasmin"
+  ]
+}
