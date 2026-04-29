@@ -288,3 +288,93 @@ Competitive moat: the four primitives are only useful when grounded in saved con
 This ADR is itself a commitment-shaped artifact. Once Phase 1 ships, it should be re-saved through `/commit` with `commitment_type="ADR"` and this .md file becomes the snapshot, not the source of truth.
 
 ---
+
+## Amendment A — Dual Generation Paths (2026-04-29)
+
+**Status:** ACCEPTED
+**Decider:** Chris Oladapo
+
+### Context
+
+ADR-032 Phase 1 shipped the snapshot pipeline with Gemini as the generator on all surfaces. During MCP dogfooding, two problems surfaced:
+
+1. **Timeout:** The MCP client has a 30s hard timeout. Two sequential Gemini calls (generation + LLM conflict detection) on broad topics exceed this, causing tool call failures.
+2. **Redundant synthesis:** When `snapshot` is called from the MCP surface, an LLM (Claude) is already in the loop. The Gemini generation call is synthesizing content that Claude could synthesize itself — with better quality, because Claude has full conversation context that Gemini does not.
+
+The ADR's assumption that Gemini should generate on all surfaces was written before the MCP surface was dogfooded. It holds for the frontend (no LLM in the loop) but breaks down on the MCP/agentic surface where an LLM is the caller.
+
+### Decision
+
+Introduce two explicit generation paths behind the same persistence pipeline:
+
+| Surface | Generator | Rationale |
+|---|---|---|
+| Frontend / dashboard | Gemini (backend) | No LLM in the loop — Gemini IS the synthesizer |
+| MCP / agentic (Claude, Cursor, etc.) | Calling LLM (in-context) | LLM is already present — Gemini is redundant and slow |
+
+**Evidence tier is surface-agnostic.** Tier B/C/D is still computed deterministically from source quality (content_share of cited memories), not from which LLM synthesized. A Claude-synthesized snapshot from full memory content is still Tier B. The tier model does not change.
+
+### API changes
+
+Split `POST /api/v1/snapshots/` into two cooperating endpoints:
+
+**`POST /api/v1/snapshots/sources`** (new) — MCP path, step 1
+- Runs `buildSnapshotPrompt` (source selection, recency-weighted, LIMIT 15)
+- Runs hybrid conflict detection (deterministic pass + LLM pass)
+- Computes evidence tier from citation bundle
+- Returns: `{ sources, citations, conflicts, evidence_tier, source_memory_max_content_updated_at }`
+- No generation. No Gemini. Always fast.
+
+**`POST /api/v1/snapshots/`** (amended) — accepts either generation mode
+- Existing mode (frontend): body contains `{ topic }` only → backend runs Gemini generation as before
+- New mode (MCP): body contains `{ topic, content, cited_ids, evidence_tier }` → backend skips generation, persists caller-provided content
+- Conflict detection, versioning, draft status, event-driven gate — all unchanged regardless of mode
+
+**MCP tool flow:**
+```
+1. snapshot_sources(topic)
+   → returns citation bundle + conflicts to Claude
+
+2. Claude synthesizes in-context
+   → reads sources, produces state document with full session context
+
+3. save_snapshot(topic, content, cited_ids, evidence_tier)
+   → persists Claude's synthesis as draft, runs claim verification, returns snapshot_id
+
+4. accept_snapshot(id)  [separate explicit step, unchanged]
+   → promotes draft → canonical
+```
+
+**Frontend flow (unchanged):**
+```
+1. POST /api/v1/snapshots/ with { topic }
+   → backend runs full Gemini pipeline as before
+   → returns draft snapshot_id
+```
+
+### New MCP tools
+
+- `snapshot_sources(topic)` — step 1 of MCP path; returns bundle for Claude to synthesize
+- `save_snapshot(topic, content, cited_ids, evidence_tier)` — step 3; persists Claude's synthesis
+- `get_snapshot(topic | snapshot_id)` — reads existing canonical snapshot content into Claude context
+- `accept_snapshot(id)` — promotes draft to canonical from within a Claude session
+
+The existing `snapshot(topic)` tool is **not removed** — it remains valid for users who want the single-call Gemini path from MCP. Its timeout is bumped to 60s to accommodate the Gemini pipeline.
+
+### Evidence tier for caller-provided content
+
+When the MCP path provides `content` directly, the backend cannot verify what the caller actually cited. To preserve tier integrity:
+
+- `evidence_tier` is **not caller-controlled**. The backend recomputes it from the `cited_ids` the caller provides, using the same `content_share` formula against the fetched memory content.
+- The caller provides `cited_ids`; the backend derives tier. A caller cannot claim Tier A by assertion.
+- `grounded_ratio` is computed by running the claim verifier against the caller-provided content and the cited source text — same verification path as the Gemini path.
+
+### Cost implication
+
+MCP path eliminates both Gemini calls per snapshot on the MCP surface. The LLM conflict detection pass is retained on `snapshot_sources` because it surfaces narrative conflicts Claude should know about before synthesizing, and its failure is already benign.
+
+### Risks
+
+- **Caller-provided content quality.** Claude may paraphrase or fill gaps. Claim verification (`grounded_ratio`) is the guard — same as Gemini path.
+- **Two paths to maintain.** Any change to conflict detection, tier classification, or versioning must work for both. Mitigated by keeping both paths behind the same persistence route — only the generation step diverges.
+- **`snapshot(topic)` tool ambiguity.** The existing tool now has an implicit surface assumption (Gemini path). Long-term it should be deprecated in favour of the explicit two-step MCP path. Phase 2 deprecation, not Phase 1.
