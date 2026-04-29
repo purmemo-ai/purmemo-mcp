@@ -2405,7 +2405,7 @@ export async function handleSaveTestResult(args) {
       ``,
       `Status: ${response.status}`,
       `Project: ${response.project_name}`,
-      `Memory ID: ${response.memory_id}`,
+      `Memory ID: ${response.id ?? response.memory_id}`,
       response.linked_task
         ? `Linked Task: #${response.linked_task.sequence} — ${response.linked_task.title}`
         : `Linked Task: none (no active task for this project)`,

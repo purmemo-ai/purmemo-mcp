@@ -1357,8 +1357,13 @@ RETURNS:
     },
     description: `Get the next pending task for a project and mark it active.
 
-Fetches the lowest-sequence pending task from project_tasks, sets its status to 'active',
+Fetches the lowest-sequence pending task from the project_tasks queue, sets its status to 'active',
 and returns the task details plus a brief from the linked PRD memory.
+
+NOTE: project_tasks is a structured work queue — separate from recall_memories todos.
+Tasks are created explicitly via the task management workflow, not auto-populated from
+saved conversations. If this returns "no pending tasks", the project queue is empty —
+use recall_memories to find work items in saved conversations instead.
 
 Call this at the start of a work session to pick up where you left off.
 When done, call complete_task({ task_id, verification_summary }) to close the loop.
