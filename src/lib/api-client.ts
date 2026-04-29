@@ -143,7 +143,7 @@ export function safeErrorMessage(error) {
   if (error instanceof CircuitBreakerOpenError) {
     return 'Service temporarily unavailable. Please try again in a moment.';
   }
-  if (error.message?.includes('API Error 401') || error.message?.includes('API Error 403')) {
+  if (error.message?.includes('API Error 401')) {
     return 'Invalid or missing API key.\n\nOption 1 — Easy setup (opens browser):\n  npx purmemo-mcp setup\n\nOption 2 — Manual:\n  claude mcp remove purmemo\n  claude mcp add purmemo -e PURMEMO_API_KEY=your-key -- npx -y purmemo-mcp\n\nGet your key at: https://app.purmemo.ai';
   }
   // Surface api-side detail messages on 4xx (404 / 422 / etc.) instead of
