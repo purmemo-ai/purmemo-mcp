@@ -417,7 +417,7 @@ function assembleBrief(memories: Memory[], todos: Todo[], projectFilter?: string
 export async function handleGenerateHandoffBrief(args: {
   project_name?: string;
   token_budget?: number;
-}) {
+}, apiKey = null) {
   const toolName = 'generate_handoff_brief';
   const requestId = `${toolName}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
 

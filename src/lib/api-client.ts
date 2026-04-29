@@ -9,6 +9,7 @@
  */
 
 import { structuredLog } from './logger.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 // ============================================================================
 // Module state — set via initApiClient()
@@ -16,6 +17,24 @@ import { structuredLog } from './logger.js';
 
 let API_URL = '';
 let _resolveApiKey = () => null;
+
+// Per-request API key stored in AsyncLocalStorage — concurrency-safe.
+// Each concurrent request runs in its own async context so keys never bleed
+// between users (unlike a plain module-level variable).
+const _requestKeyStore = new AsyncLocalStorage<string>();
+
+export function setRequestApiKey(key: string | null) {
+  // No-op: callers use runWithApiKey() instead. Kept for backwards compat.
+}
+export function clearRequestApiKey() {
+  // No-op: context exits automatically when the async context ends.
+}
+
+// Run fn inside an async context that scopes apiKey to all makeApiCall
+// invocations within it (including nested async calls).
+export function runWithApiKey<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  return _requestKeyStore.run(key, fn);
+}
 
 export function initApiClient({ apiUrl, resolveApiKey }) {
   API_URL = apiUrl;
@@ -187,7 +206,7 @@ export function sanitizeUnicode(text) {
 export async function makeApiCall(endpoint, options = {}, apiKeyOverride = null) {
   const method = options.method || 'GET';
   const requestId = `api_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-  const effectiveKey = apiKeyOverride || _resolveApiKey();
+  const effectiveKey = apiKeyOverride || _requestKeyStore.getStore() || _resolveApiKey();
 
   structuredLog.info('API call starting', {
     request_id: requestId,

@@ -7,7 +7,7 @@
  */
 
 import { structuredLog } from '../lib/logger.js';
-import { apiCircuitBreaker } from '../lib/api-client.js';
+import { apiCircuitBreaker, runWithApiKey } from '../lib/api-client.js';
 import {
   handleSaveConversation,
   handleSaveArtifact,
@@ -269,10 +269,12 @@ export async function startRemoteServer(ctx) {
 
     const localHandler = localOnlyHandlers[toolName];
     if (localHandler) {
-      // Use per-request API key for the handler call (concurrency-safe)
       const effectiveKey = apiKey || resolvedApiKey;
-      try { return await localHandler(toolArgs, effectiveKey); }
-      catch (e) { return { content: [{ type: 'text', text: `Error: ${e.message}` }] }; }
+      try {
+        // runWithApiKey scopes the key to this async context via AsyncLocalStorage —
+        // concurrent requests from different users never bleed into each other.
+        return await runWithApiKey(effectiveKey, () => localHandler(toolArgs));
+      } catch (e) { return { content: [{ type: 'text', text: `Error: ${e.message}` }] }; }
     }
 
     // recall_memories, get_memory_details, discover_related_conversations
