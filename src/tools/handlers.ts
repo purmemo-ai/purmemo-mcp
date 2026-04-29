@@ -825,6 +825,234 @@ export async function handleCommit(args) {
 // Thin wrapper over POST /api/v1/snapshots/. The user-facing slash command
 // /snapshot calls this. Returns the draft snapshot id; promotion to canonical
 // is a separate explicit step (POST /:id/accept) per ADR-032 review trigger.
+// ── snapshot_sources ─────────────────────────────────────────────────────────
+// MCP path step 1 (ADR-032 Amendment A): fetch citation bundle + conflict
+// detection results so Claude can synthesize in-context. No Gemini call.
+export async function handleSnapshotSources(args) {
+  const toolName = 'snapshot_sources';
+  const requestId = `${toolName}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  const startTime = Date.now();
+
+  structuredLog.info(`${toolName}: starting`, { tool_name: toolName, request_id: requestId });
+
+  try {
+    const topic = (args.topic || '').trim();
+    if (!topic) {
+      return { content: [{ type: 'text', text: '❌ Missing required field: topic' }] };
+    }
+
+    const data = await makeApiCall('/api/v1/snapshots/sources', {
+      method: 'POST',
+      body: JSON.stringify({ topic }),
+    });
+
+    structuredLog.info(`${toolName}: complete`, {
+      tool_name: toolName, request_id: requestId,
+      duration_ms: Date.now() - startTime,
+      source_count: data.sources?.length,
+      evidence_tier: data.evidence_tier,
+      conflict_count: data.conflicts?.length,
+    });
+
+    const sources = data.sources || [];
+    const conflicts = data.conflicts || [];
+    const uncertainPairs = data.uncertain_pairs || [];
+
+    const sourceLines = sources.map((s, i) =>
+      `### Source ${i + 1} — ${s.title || 'Untitled'}\n_id: ${s.id} · updated: ${s.content_updated_at?.slice(0, 10) || '?'} · tags: ${(s.tags || []).slice(0, 5).join(', ')}_\n\n${(s.content || '').slice(0, 3000)}${(s.content || '').length > 3000 ? '…' : ''}`
+    ).join('\n\n---\n\n');
+
+    const conflictSection = conflicts.length > 0
+      ? `\n\n## Conflicts Detected (${conflicts.length})\n${conflicts.map(c => `- **${c.kind || 'conflict'}**: ${c.description || c.text || JSON.stringify(c)}`).join('\n')}`
+      : '';
+
+    const uncertainSection = uncertainPairs.length > 0
+      ? `\n\n## Uncertain Pairs (${uncertainPairs.length})\n${uncertainPairs.map(p => `- ${p.description || JSON.stringify(p)}`).join('\n')}`
+      : '';
+
+    return {
+      content: [{
+        type: 'text',
+        text: `# Snapshot Sources — ${topic}\n\n**Evidence tier:** ${data.evidence_tier} · **Sources:** ${sources.length} · **Conflicts:** ${conflicts.length}\n**Cited IDs:** ${data.cited_memory_ids?.join(', ')}\n\n_Synthesize these sources into a current-state document, then call save_snapshot(topic, content, cited_ids) to persist._\n\n${sourceLines}${conflictSection}${uncertainSection}`,
+      }]
+    };
+
+  } catch (error) {
+    structuredLog.error(`${toolName}: failed`, { tool_name: toolName, request_id: requestId, error_message: error.message });
+    return { content: [{ type: 'text', text: `❌ snapshot_sources error: ${safeErrorMessage(error)}` }] };
+  }
+}
+
+// ── save_snapshot ─────────────────────────────────────────────────────────────
+// MCP path step 3 (ADR-032 Amendment A): persist Claude's synthesized content
+// as a draft snapshot. Backend derives evidence_tier from cited_ids — not
+// caller-controlled. Runs claim verifier on provided content.
+export async function handleSaveSnapshot(args) {
+  const toolName = 'save_snapshot';
+  const requestId = `${toolName}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  const startTime = Date.now();
+
+  structuredLog.info(`${toolName}: starting`, { tool_name: toolName, request_id: requestId });
+
+  try {
+    const topic = (args.topic || '').trim();
+    const content = (args.content || '').trim();
+    const citedIds = args.cited_ids || [];
+
+    if (!topic) return { content: [{ type: 'text', text: '❌ Missing required field: topic' }] };
+    if (content.length < 100) return { content: [{ type: 'text', text: '❌ content too short (min 100 chars)' }] };
+    if (citedIds.length === 0) return { content: [{ type: 'text', text: '❌ cited_ids required — pass the IDs from snapshot_sources' }] };
+
+    const data = await makeApiCall('/api/v1/snapshots/', {
+      method: 'POST',
+      body: JSON.stringify({ topic, content, cited_ids: citedIds, force: args.force || false }),
+    });
+
+    structuredLog.info(`${toolName}: complete`, {
+      tool_name: toolName, request_id: requestId,
+      duration_ms: Date.now() - startTime,
+      snapshot_id: data.id,
+      version: data.version,
+    });
+
+    if (data.regeneration_skipped) {
+      return { content: [{ type: 'text', text: `ℹ️ No source memories changed since last canonical — snapshot not regenerated.\n\nPass force: true to override.\n\nExisting canonical ID: ${data.id}` }] };
+    }
+
+    return {
+      content: [{
+        type: 'text',
+        text: `✅ Snapshot DRAFTED!\n\n📎 Topic: ${data.topic}\n🔖 Version: ${data.version}\n📊 Evidence tier: ${data.evidenceTier ?? data.evidence_tier}\n📏 Grounded ratio: ${typeof data.groundedRatio === 'number' ? data.groundedRatio.toFixed(2) : (data.grounded_ratio ?? '—')}\n🔗 Cited memories: ${data.cited_memory_count ?? citedIds.length}\n🆔 Snapshot ID: ${data.id}\n📝 Status: draft\n🤖 Generator: caller-provided (Claude)\n\nNext: call accept_snapshot(id: "${data.id}") to promote to canonical.`
+      }]
+    };
+
+  } catch (error) {
+    structuredLog.error(`${toolName}: failed`, { tool_name: toolName, request_id: requestId, error_message: error.message });
+    return { content: [{ type: 'text', text: `❌ save_snapshot error: ${safeErrorMessage(error)}` }] };
+  }
+}
+
+// ── accept_snapshot ───────────────────────────────────────────────────────────
+// Promote a draft snapshot to canonical. Surfaces gate_blockers on 409 so
+// Claude can present them to the user. Supports force:true for override.
+export async function handleAcceptSnapshot(args) {
+  const toolName = 'accept_snapshot';
+  const requestId = `${toolName}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  const startTime = Date.now();
+
+  structuredLog.info(`${toolName}: starting`, { tool_name: toolName, request_id: requestId });
+
+  try {
+    const snapshotId = (args.snapshot_id || '').trim();
+    if (!snapshotId) return { content: [{ type: 'text', text: '❌ Missing required field: snapshot_id' }] };
+
+    const data = await makeApiCall(`/api/v1/snapshots/${snapshotId}/accept`, {
+      method: 'POST',
+      body: JSON.stringify({ force: args.force || false }),
+    });
+
+    structuredLog.info(`${toolName}: complete`, { tool_name: toolName, request_id: requestId, duration_ms: Date.now() - startTime });
+
+    // Gate blockers — 409 is handled as an error by makeApiCall, caught below
+    return {
+      content: [{
+        type: 'text',
+        text: `✅ Snapshot PROMOTED to canonical!\n\n🆔 ID: ${data.promoted?.id}\n📎 Topic: ${data.promoted?.topic}\n🔖 Version: ${data.promoted?.version}\n${data.superseded_id ? `🔁 Superseded: ${data.superseded_id}` : ''}\n${data.approved_with_overrides?.length ? `⚠️ Approved with overrides: ${data.approved_with_overrides.join(', ')}` : ''}`
+      }]
+    };
+
+  } catch (error) {
+    // Surface gate_blockers from 409 in a readable way
+    const msg = error.message || '';
+    const is409 = msg.includes('409');
+    if (is409) {
+      try {
+        const bodyMatch = msg.match(/API Error 409:\s*(.+)$/s);
+        if (bodyMatch) {
+          const parsed = JSON.parse(bodyMatch[1]);
+          const blockers = (parsed.gate_blockers || []).map(b => `- **${b.code}**: ${b.detail}`).join('\n');
+          return { content: [{ type: 'text', text: `⚠️ Snapshot requires review before promotion:\n\n${blockers}\n\nCall accept_snapshot(snapshot_id: "${snapshotId}", force: true) to approve and promote anyway.` }] };
+        }
+      } catch { /* fall through */ }
+    }
+    structuredLog.error(`${toolName}: failed`, { tool_name: toolName, request_id: requestId, error_message: error.message });
+    return { content: [{ type: 'text', text: `❌ accept_snapshot error: ${safeErrorMessage(error)}` }] };
+  }
+}
+
+export async function handleGetSnapshot(args) {
+  const toolName = 'get_snapshot';
+  const requestId = `${toolName}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+  structuredLog.info(`${toolName}: starting`, { tool_name: toolName, request_id: requestId });
+
+  try {
+    const topic = (args.topic || '').trim();
+    const snapshotId = (args.snapshot_id || '').trim();
+
+    if (!topic && !snapshotId) {
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ Provide either topic or snapshot_id.\n\nExamples:\n- get_snapshot(topic: "architecture") — fetches canonical snapshot\n- get_snapshot(snapshot_id: "uuid") — fetches specific snapshot`
+        }]
+      };
+    }
+
+    let data;
+    if (snapshotId) {
+      data = await makeApiCall(`/api/v1/snapshots/${snapshotId}`, { method: 'GET' });
+    } else {
+      // Fetch canonical snapshot for topic
+      const params = new URLSearchParams({ topic, status: 'canonical', page_size: '1' });
+      const list = await makeApiCall(`/api/v1/snapshots/?${params}`, { method: 'GET' });
+      const snapshots = list.snapshots || [];
+      if (snapshots.length === 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: `No canonical snapshot found for topic "${topic}".\n\nRun snapshot(topic: "${topic}") to generate one, then accept it to promote to canonical.`
+          }]
+        };
+      }
+      // Fetch full content of the canonical
+      data = await makeApiCall(`/api/v1/snapshots/${snapshots[0].id}`, { method: 'GET' });
+    }
+
+    structuredLog.info(`${toolName}: complete`, { tool_name: toolName, request_id: requestId, snapshot_id: data.id });
+
+    const tier = data.evidence_tier ?? data.evidenceTier ?? '?';
+    const version = data.version ?? '?';
+    const status = data.status ?? '?';
+    const topic_out = data.topic ?? topic;
+    const grounded = typeof data.grounded_ratio === 'number' ? data.grounded_ratio.toFixed(2) : '—';
+    const conflicts = Array.isArray(data.conflicts_detected) ? data.conflicts_detected.length : 0;
+
+    const header = [
+      `# Snapshot — ${topic_out}`,
+      `**Version:** ${version} · **Status:** ${status} · **Tier:** ${tier} · **Grounded:** ${grounded} · **Conflicts:** ${conflicts}`,
+      `**ID:** ${data.id}`,
+      ``,
+    ].join('\n');
+
+    return {
+      content: [{
+        type: 'text',
+        text: header + (data.content || '(no content)'),
+      }]
+    };
+
+  } catch (error) {
+    structuredLog.error(`${toolName}: failed`, { tool_name: toolName, request_id: requestId, error_message: error.message });
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ get_snapshot error: ${safeErrorMessage(error)}`
+      }]
+    };
+  }
+}
+
 export async function handleSnapshot(args) {
   const toolName = 'snapshot';
   const requestId = `${toolName}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
@@ -858,6 +1086,7 @@ export async function handleSnapshot(args) {
     const data = await makeApiCall('/api/v1/snapshots/', {
       method: 'POST',
       body: JSON.stringify({ topic }),
+      timeoutMs: 60000,
     });
 
     structuredLog.info(`${toolName}: completed`, {

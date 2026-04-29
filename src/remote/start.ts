@@ -23,6 +23,10 @@ import {
   handleGetAcknowledgedErrors,
   handleSaveTestResult,
   handleGetNextTask,
+  handleSnapshotSources,
+  handleSaveSnapshot,
+  handleGetSnapshot,
+  handleAcceptSnapshot,
   handleCompleteTask,
   handleSaveInvestigation
 } from '../tools/handlers.js';
@@ -275,6 +279,10 @@ export async function startRemoteServer(ctx) {
       'get_next_task': handleGetNextTask,
       'complete_task': handleCompleteTask,
       'save_investigation_result': handleSaveInvestigation,
+      'snapshot_sources': handleSnapshotSources,
+      'save_snapshot': handleSaveSnapshot,
+      'get_snapshot': handleGetSnapshot,
+      'accept_snapshot': handleAcceptSnapshot,
     };
 
     const localHandler = localOnlyHandlers[toolName];

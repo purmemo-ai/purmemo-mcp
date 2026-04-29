@@ -223,7 +223,8 @@ export async function makeApiCall(endpoint, options = {}, apiKeyOverride = null)
 
   return await apiCircuitBreaker.execute(async () => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const timeoutMs = options.timeoutMs || 30000;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(`${API_URL}${endpoint}`, {
@@ -321,7 +322,7 @@ export async function makeApiCall(endpoint, options = {}, apiKeyOverride = null)
         structuredLog.error('API request timeout', {
           request_id: requestId,
           endpoint,
-          timeout_ms: 30000
+          timeout_ms: timeoutMs
         });
         throw new Error('Request timeout after 30 seconds');
       }

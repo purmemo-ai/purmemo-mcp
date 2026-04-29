@@ -86,7 +86,11 @@ import {
   handleSaveInvestigation,
   handleSaveTestResult,
   handleGetNextTask,
-  handleCompleteTask
+  handleCompleteTask,
+  handleSnapshotSources,
+  handleSaveSnapshot,
+  handleGetSnapshot,
+  handleAcceptSnapshot
 } from './tools/handlers.js';
 import { handleGenerateHandoffBrief } from './tools/handoff.js';
 import { createRequire } from 'module';
@@ -504,6 +508,73 @@ EXAMPLES:
         }
       },
       required: ['topic']
+    }
+  },
+  // ADR-032 Amendment A: MCP agentic path — Claude synthesizes, no Gemini call.
+  {
+    name: 'snapshot_sources',
+    annotations: { title: 'Get Snapshot Sources', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    description: `Fetch citation bundle + conflict detection for a topic so YOU can synthesize the snapshot in-context. Step 1 of the MCP snapshot path (ADR-032 Amendment A).
+
+WHEN TO USE: When you want to generate a snapshot from inside Claude. Returns source memories + conflicts so you synthesize, then call save_snapshot() to persist.
+
+FLOW:
+1. snapshot_sources(topic) → sources returned to you
+2. You synthesize a current-state document from the sources
+3. save_snapshot(topic, content, cited_ids) → persists your synthesis as a draft
+4. accept_snapshot(snapshot_id) → promotes to canonical`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        topic: { type: 'string', description: 'Topic keyword — fuzzy matches memory tags and titles.', minLength: 1, maxLength: 200 }
+      },
+      required: ['topic']
+    }
+  },
+  {
+    name: 'save_snapshot',
+    annotations: { title: 'Save Snapshot Draft', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    description: `Persist your synthesized snapshot content as a draft. Step 3 of the MCP snapshot path (ADR-032 Amendment A).
+
+Call this after synthesizing from snapshot_sources(). Backend derives evidence_tier from cited_ids — not caller-controlled. Runs claim verification on your content.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        topic: { type: 'string', description: 'Topic this snapshot covers.', minLength: 1, maxLength: 200 },
+        content: { type: 'string', description: 'Your synthesized snapshot content (markdown). Min 100 chars.', minLength: 100 },
+        cited_ids: { type: 'array', items: { type: 'string' }, description: 'Memory IDs cited — use the cited_memory_ids from snapshot_sources().', minItems: 1 },
+        force: { type: 'boolean', description: 'Skip event-driven regeneration gate. Default false.', default: false }
+      },
+      required: ['topic', 'content', 'cited_ids']
+    }
+  },
+  {
+    name: 'get_snapshot',
+    annotations: { title: 'Get Snapshot', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    description: `Read an existing canonical snapshot into context. Fast — no LLM calls.
+
+WHEN TO USE: When you need the current canonical state document for a topic (e.g. architecture, auth, glossary) without generating a new one.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        topic: { type: 'string', description: 'Topic to fetch canonical snapshot for. Either topic or snapshot_id required.' },
+        snapshot_id: { type: 'string', description: 'Specific snapshot UUID. Either topic or snapshot_id required.' }
+      }
+    }
+  },
+  {
+    name: 'accept_snapshot',
+    annotations: { title: 'Accept Snapshot', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    description: `Promote a draft snapshot to canonical. Supersedes the prior canonical for this topic.
+
+If gate blockers exist (conflicts detected, tier downgrade, or first canonical), returns them for review. Pass force: true to approve and promote anyway.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        snapshot_id: { type: 'string', description: 'UUID of the draft snapshot to promote.' },
+        force: { type: 'boolean', description: 'Override gate blockers. Default false.', default: false }
+      },
+      required: ['snapshot_id']
     }
   },
   {
@@ -1539,6 +1610,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return withUpdateNotice(await handleCommit(args));
     case 'snapshot':
       return withUpdateNotice(await handleSnapshot(args));
+    case 'snapshot_sources':
+      return withUpdateNotice(await handleSnapshotSources(args));
+    case 'save_snapshot':
+      return withUpdateNotice(await handleSaveSnapshot(args));
+    case 'get_snapshot':
+      return withUpdateNotice(await handleGetSnapshot(args));
+    case 'accept_snapshot':
+      return withUpdateNotice(await handleAcceptSnapshot(args));
     case 'recall_memories':
       return withUpdateNotice(await handleRecallMemories(args));
     case 'get_memory_details':
