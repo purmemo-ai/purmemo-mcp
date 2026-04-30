@@ -29,6 +29,7 @@ import {
   clearActivePointer,
 } from './auth/profile-resolver.js';
 import { migrateLegacyAuthIfNeeded } from './auth/profile-migrator.js';
+import { shouldUseEnvVarAuth } from './auth/setup-decisions.js';
 import { fileURLToPath } from 'node:url';
 
 const __dirname  = path.dirname(fileURLToPath(import.meta.url));
@@ -226,7 +227,13 @@ async function runSetup(forceNewProfile = false) {
   }
 
   // 2. API key in env (dashboard path: PURMEMO_API_KEY=sk-... npx purmemo-mcp setup)
-  if (process.env.PURMEMO_API_KEY) {
+  //
+  // `add` MUST skip this branch — the user explicitly asked to connect a new
+  // account, and a stale PURMEMO_API_KEY in their shell would hijack the flow
+  // and silently re-confirm whichever account that key belongs to. (Same class
+  // of bug as ADR-031 / Jode-Leigh cross-account saves, 2026-04-24.)
+  // Decision lives in shouldUseEnvVarAuth() so a regression test can lock it.
+  if (shouldUseEnvVarAuth({ envApiKey: process.env.PURMEMO_API_KEY, forceNewProfile })) {
     const spinner = ora('Verifying your API key…').start();
     const user = await verifyApiKey(process.env.PURMEMO_API_KEY);
     if (!user) {
@@ -235,6 +242,14 @@ async function runSetup(forceNewProfile = false) {
       process.exit(1);
     }
     spinner.stop();
+
+    // Loud warning so the user knows the env var (not OAuth) drove this auth.
+    // ADR-031 history shows PURMEMO_API_KEY in the shell is a recurring footgun.
+    console.log(chalk.yellow('⚠️  Authenticated via PURMEMO_API_KEY environment variable'));
+    console.log(chalk.gray(`   Account: ${user.email || 'unknown'}`));
+    console.log(chalk.gray(`   If this is not the account you wanted, run:`));
+    console.log(chalk.cyan(`   unset PURMEMO_API_KEY && purmemo init`));
+    console.log('');
 
     const envEmail = (user.email || '').trim().toLowerCase();
     const tokenData = {
