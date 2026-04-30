@@ -30,6 +30,7 @@ import {
 } from './auth/profile-resolver.js';
 import { migrateLegacyAuthIfNeeded } from './auth/profile-migrator.js';
 import { shouldUseEnvVarAuth } from './auth/setup-decisions.js';
+import { detectInstallMethod, type InstallMethod } from './auth/install-detection.js';
 import { fileURLToPath } from 'node:url';
 
 const __dirname  = path.dirname(fileURLToPath(import.meta.url));
@@ -105,63 +106,123 @@ function runHelp() {
 
 // ─── Update ───────────────────────────────────────────────────────────────────
 //
-// `npx purmemo-mcp@latest` re-resolves on every run, BUT npm caches the
-// resolved tarball in ~/.npm/_npx/<hash>/ for ~5 days. If the cache is stale,
-// users get an old version even when they meant to update. This command nukes
-// the cache and reports what version will be picked up next.
+// `purmemo --update` does the right thing per install method:
+//   - Global (npm i -g)  → re-runs `npm i -g purmemo-mcp@latest` in place.
+//   - npx               → clears ~/.npm/_npx so next invocation re-resolves.
+//   - Local (project)   → tells the user to bump it in their package.json.
+//   - Unknown           → prints manual instructions.
+//
+// The pre-v15.7 version only cleared the npx cache and printed "next run will
+// fetch X" — confusing for users who installed globally because their `purmemo`
+// bin stayed on the old version.
 
 async function runUpdate() {
   console.log(chalk.cyan(banner));
 
-  const npxCache = path.join(os.homedir(), '.npm', '_npx');
-  const cacheExists = fs.existsSync(npxCache);
+  const installedVersion = readInstalledVersion();
+  const latest = await fetchLatestVersion();
+  const installMethod = detectCurrentInstallMethod();
 
-  if (cacheExists) {
-    try {
-      fs.rmSync(npxCache, { recursive: true, force: true });
-      console.log(chalk.green('✅ npx cache cleared'));
-      console.log(chalk.gray(`   Removed: ${npxCache}`));
-    } catch (err) {
-      console.log(chalk.yellow(`⚠️  Could not clear npx cache: ${(err as Error).message}`));
-      console.log(chalk.gray(`   You can clear it manually: rm -rf ${npxCache}`));
-    }
-  } else {
-    console.log(chalk.gray('No npx cache found (nothing to clear).'));
+  console.log(chalk.bold('Versions:'));
+  console.log(chalk.gray(`   Installed: v${installedVersion}`));
+  console.log(chalk.gray(`   Latest:    ${latest ? 'v' + latest : 'could not fetch'}`));
+  console.log(chalk.gray(`   Install:   ${installMethod}`));
+  console.log('');
+
+  if (latest && latest === installedVersion) {
+    console.log(chalk.green('✅ You are on the latest version.'));
+    return;
+  }
+  if (!latest) {
+    console.log(chalk.yellow('Could not check npm registry. Try again with internet access.'));
+    return;
   }
 
-  // Report installed and latest versions so the user knows what they'll get next.
-  let installedVersion = 'unknown';
+  // Need to actually upgrade.
+  if (installMethod === 'global') {
+    console.log(chalk.cyan(`Upgrading global install to v${latest}…`));
+    const spinner = ora('Running: npm i -g purmemo-mcp@latest').start();
+    try {
+      execSync('npm i -g purmemo-mcp@latest', { stdio: 'pipe' });
+      spinner.stop();
+      console.log(chalk.green(`✅ Upgraded to v${latest}`));
+      console.log(chalk.gray('   Run `purmemo accounts` to verify.'));
+    } catch (err) {
+      spinner.stop();
+      const stderr = (err as { stderr?: Buffer }).stderr?.toString() || (err as Error).message;
+      console.log(chalk.red('❌ Upgrade failed.'));
+      if (stderr.includes('EACCES') || stderr.includes('permission')) {
+        console.log(chalk.gray('   This usually means npm needs sudo on your system.'));
+        console.log(chalk.cyan('   Try: sudo npm i -g purmemo-mcp@latest'));
+      } else {
+        console.log(chalk.gray(`   ${stderr.split('\n')[0]}`));
+        console.log(chalk.cyan('   Try manually: npm i -g purmemo-mcp@latest'));
+      }
+    }
+    return;
+  }
+
+  if (installMethod === 'npx') {
+    const npxCache = path.join(os.homedir(), '.npm', '_npx');
+    if (fs.existsSync(npxCache)) {
+      try {
+        fs.rmSync(npxCache, { recursive: true, force: true });
+        console.log(chalk.green(`✅ npx cache cleared. Next \`npx purmemo-mcp@latest\` will fetch v${latest}.`));
+      } catch (err) {
+        console.log(chalk.yellow(`⚠️  Could not clear npx cache: ${(err as Error).message}`));
+        console.log(chalk.gray(`   You can clear it manually: rm -rf ${npxCache}`));
+      }
+    } else {
+      console.log(chalk.gray('No npx cache to clear.'));
+      console.log(chalk.green(`Next \`npx purmemo-mcp@latest\` will fetch v${latest}.`));
+    }
+    return;
+  }
+
+  if (installMethod === 'local') {
+    console.log(chalk.cyan('This is a local project install.'));
+    console.log(chalk.gray(`   Bump purmemo-mcp to ^${latest} in your package.json, then:`));
+    console.log(chalk.cyan('   npm install'));
+    return;
+  }
+
+  // unknown — running from source, mcpb bundle, or a setup we don't recognize.
+  console.log(chalk.cyan(`v${latest} is available. Update manually:`));
+  console.log(chalk.gray('   • Global install: ') + chalk.cyan('npm i -g purmemo-mcp@latest'));
+  console.log(chalk.gray('   • npx users:      ') + chalk.cyan('purmemo --update'));
+  console.log(chalk.gray('   • From source:    pull the repo and rebuild'));
+}
+
+function readInstalledVersion(): string {
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-    installedVersion = pkg.version;
-  } catch {}
+    return pkg.version || 'unknown';
+  } catch { return 'unknown'; }
+}
 
-  console.log('');
-  console.log(chalk.bold('Versions:'));
-  console.log(chalk.gray(`   This invocation: v${installedVersion}`));
-
+async function fetchLatestVersion(): Promise<string | null> {
   const spinner = ora('Checking npm registry…').start();
   try {
     const res = await fetch('https://registry.npmjs.org/purmemo-mcp/latest');
     spinner.stop();
-    if (res.ok) {
-      const data = await res.json() as { version?: string };
-      const latest = data.version || 'unknown';
-      console.log(chalk.gray(`   npm latest:      v${latest}`));
-      if (latest !== installedVersion && latest !== 'unknown') {
-        console.log('');
-        console.log(chalk.green('Next `npx purmemo-mcp@latest` run will fetch v' + latest + '.'));
-      } else if (latest === installedVersion) {
-        console.log('');
-        console.log(chalk.green('You are on the latest version.'));
-      }
-    } else {
-      console.log(chalk.gray(`   npm latest:      could not fetch (${res.status})`));
-    }
-  } catch (err) {
+    if (!res.ok) return null;
+    const data = await res.json() as { version?: string };
+    return data.version || null;
+  } catch {
     spinner.stop();
-    console.log(chalk.gray(`   npm latest:      could not fetch (${(err as Error).message})`));
+    return null;
   }
+}
+
+function detectCurrentInstallMethod(): InstallMethod {
+  // packageDir = directory containing this package's package.json (one level
+  // above dist/setup.js → ../).
+  const packageDir = path.resolve(__dirname, '..');
+  let globalRoot: string | null = null;
+  try {
+    globalRoot = execSync('npm root -g', { encoding: 'utf8', timeout: 5000 }).trim();
+  } catch { /* npm not on PATH or slow — fall back to non-global */ }
+  return detectInstallMethod(packageDir, globalRoot);
 }
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -890,6 +951,8 @@ function printSuccess() {
   console.log(chalk.gray('  Recall later:        ') + chalk.white('"What did we discuss about X?"'));
   console.log('');
   console.log(chalk.gray('Open a new session in Claude Code, Codex, or Gemini to activate.'));
+  console.log('');
+  console.log(chalk.gray('💡 Upgrade later with: ') + chalk.cyan('purmemo --update'));
 }
 
 // ─── Status ───────────────────────────────────────────────────────────────────
