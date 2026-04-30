@@ -18,6 +18,17 @@ import * as os from 'node:os';
 import * as readline from 'node:readline/promises';
 import { execSync } from 'node:child_process';
 import TokenStore from './auth/token-store.js';
+import {
+  getActiveTokenFile,
+  getActiveProfileLabel,
+  getProfilesDir,
+  profileFile,
+  listProfiles,
+  readActivePointer,
+  writeActivePointer,
+  clearActivePointer,
+} from './auth/profile-resolver.js';
+import { migrateLegacyAuthIfNeeded } from './auth/profile-migrator.js';
 import { fileURLToPath } from 'node:url';
 
 const __dirname  = path.dirname(fileURLToPath(import.meta.url));
@@ -46,25 +57,120 @@ const banner = `
 
 const command = process.argv[2] || 'setup';
 
+// Migrate legacy auth.json → profiles/<email>.json before any command runs.
+// Idempotent: no-op once migrated, no-op on fresh installs.
+await migrateLegacyAuthIfNeeded();
+
 switch (command) {
   case 'setup':
-  case 'init':   await runSetup();  break;
-  case 'status': await runStatus(); break;
-  case 'logout': await runLogout(); break;
-  case 'hooks':  await runHooksOnly(); break;
+  case 'init':     await runSetup();  break;
+  case 'status':   await runStatus(); break;
+  case 'logout':   await runLogout(); break;
+  case 'hooks':    await runHooksOnly(); break;
+  case 'accounts': await runAccounts(); break;
+  case 'use':      await runUse(process.argv[3]); break;
+  case 'add':      await runSetup(/*forceNewProfile=*/true); break;
+  case 'remove':   await runRemove(process.argv[3], process.argv.includes('--force')); break;
+  case 'update':
+  case '--update': await runUpdate(); break;
+  case 'help':
+  case '--help':
+  case '-h':       runHelp(); break;
   default:
     console.log(chalk.red(`Unknown command: ${command}`));
-    console.log(chalk.gray('Usage: npx purmemo-mcp [setup|init|status|logout|hooks]'));
+    runHelp();
     process.exit(1);
+}
+
+function runHelp() {
+  console.log(chalk.cyan(banner));
+  console.log(chalk.bold('Usage:'));
+  console.log('  purmemo <command>          (or: npx purmemo-mcp <command>)\n');
+  console.log(chalk.bold('Commands:'));
+  console.log('  init               Connect an account and install hooks (default)');
+  console.log('  status             Show the active account and connection health');
+  console.log('  accounts           List all connected accounts');
+  console.log('  add                Connect another account (keeps existing accounts)');
+  console.log('  use <email>        Switch the active account');
+  console.log('  remove <email>     Remove a connected account');
+  console.log('  logout             Disconnect the active account');
+  console.log('  hooks              Reinstall hooks only');
+  console.log('  update             Clear the npx cache so next run picks up the latest version');
+  console.log('  help               Show this message');
+  console.log('');
+  console.log(chalk.bold('Environment:'));
+  console.log('  PURMEMO_PROFILE=<email>   Override active account for this shell only');
+}
+
+// ─── Update ───────────────────────────────────────────────────────────────────
+//
+// `npx purmemo-mcp@latest` re-resolves on every run, BUT npm caches the
+// resolved tarball in ~/.npm/_npx/<hash>/ for ~5 days. If the cache is stale,
+// users get an old version even when they meant to update. This command nukes
+// the cache and reports what version will be picked up next.
+
+async function runUpdate() {
+  console.log(chalk.cyan(banner));
+
+  const npxCache = path.join(os.homedir(), '.npm', '_npx');
+  const cacheExists = fs.existsSync(npxCache);
+
+  if (cacheExists) {
+    try {
+      fs.rmSync(npxCache, { recursive: true, force: true });
+      console.log(chalk.green('✅ npx cache cleared'));
+      console.log(chalk.gray(`   Removed: ${npxCache}`));
+    } catch (err) {
+      console.log(chalk.yellow(`⚠️  Could not clear npx cache: ${(err as Error).message}`));
+      console.log(chalk.gray(`   You can clear it manually: rm -rf ${npxCache}`));
+    }
+  } else {
+    console.log(chalk.gray('No npx cache found (nothing to clear).'));
+  }
+
+  // Report installed and latest versions so the user knows what they'll get next.
+  let installedVersion = 'unknown';
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    installedVersion = pkg.version;
+  } catch {}
+
+  console.log('');
+  console.log(chalk.bold('Versions:'));
+  console.log(chalk.gray(`   This invocation: v${installedVersion}`));
+
+  const spinner = ora('Checking npm registry…').start();
+  try {
+    const res = await fetch('https://registry.npmjs.org/purmemo-mcp/latest');
+    spinner.stop();
+    if (res.ok) {
+      const data = await res.json() as { version?: string };
+      const latest = data.version || 'unknown';
+      console.log(chalk.gray(`   npm latest:      v${latest}`));
+      if (latest !== installedVersion && latest !== 'unknown') {
+        console.log('');
+        console.log(chalk.green('Next `npx purmemo-mcp@latest` run will fetch v' + latest + '.'));
+      } else if (latest === installedVersion) {
+        console.log('');
+        console.log(chalk.green('You are on the latest version.'));
+      }
+    } else {
+      console.log(chalk.gray(`   npm latest:      could not fetch (${res.status})`));
+    }
+  } catch (err) {
+    spinner.stop();
+    console.log(chalk.gray(`   npm latest:      could not fetch (${(err as Error).message})`));
+  }
 }
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-async function runSetup() {
+async function runSetup(forceNewProfile = false) {
   console.log(chalk.cyan(banner));
 
-  // 1. Already authenticated?
-  const existing = await tokenStore.getToken();
+  // `add` re-runs OAuth into a new profile even if already connected.
+  // Skip the "already connected" short-circuit in that case.
+  const existing = forceNewProfile ? null : await tokenStore.getToken();
   if (existing?.access_token) {
     // If a new API key was passed in env, switch accounts automatically
     if (process.env.PURMEMO_API_KEY && process.env.PURMEMO_API_KEY !== existing.access_token) {
@@ -90,7 +196,14 @@ async function runSetup() {
       console.log(chalk.gray(`   Account: ${info?.email || 'unknown'}`));
       console.log(chalk.gray(`   Tier:    ${info?.tier || 'free'}`));
       console.log('');
-      console.log(chalk.gray('To switch accounts: ') + chalk.cyan('npx purmemo-mcp logout') + chalk.gray(' then run setup again.'));
+      const others = listProfiles().filter(e => e !== info?.email);
+      if (others.length > 0) {
+        console.log(chalk.gray('Other accounts on this machine: ') + chalk.cyan(others.join(', ')));
+        console.log(chalk.gray('Switch with: ') + chalk.cyan('purmemo use <email>'));
+      } else {
+        console.log(chalk.gray('Add another account: ') + chalk.cyan('purmemo add'));
+        console.log(chalk.gray('Disconnect:          ') + chalk.cyan('purmemo logout'));
+      }
       console.log('');
 
       // Offer hooks even if already connected (they may not have them yet)
@@ -123,16 +236,27 @@ async function runSetup() {
     }
     spinner.stop();
 
-    // Save to auth.json so hooks can read it
-    await tokenStore.saveToken({
+    const envEmail = (user.email || '').trim().toLowerCase();
+    const tokenData = {
       access_token: process.env.PURMEMO_API_KEY,
       token_type: 'Bearer',
       expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
       user: {
-        email: user.email || 'unknown',
+        email: envEmail || 'unknown',
         tier:  user.tier  || 'free',
       },
-    });
+    };
+    if (envEmail) {
+      try {
+        const profileStore = new TokenStore(profileFile(envEmail));
+        await profileStore.saveToken(tokenData);
+        writeActivePointer(envEmail);
+      } catch {
+        await tokenStore.saveToken(tokenData);
+      }
+    } else {
+      await tokenStore.saveToken(tokenData);
+    }
     syncKeyToShellRc(process.env.PURMEMO_API_KEY);
 
     console.log(chalk.green.bold('🎉 Connected!\n'));
@@ -195,15 +319,30 @@ async function runSetup() {
     if (pollData.status === 'completed' && pollData.api_key) {
       spinner.stop();
 
-      await tokenStore.saveToken({
+      const email = (pollData.email || '').trim().toLowerCase();
+      const tokenData = {
         access_token: pollData.api_key,
         token_type: 'Bearer',
         expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
         user: {
-          email: pollData.email || 'unknown',
+          email: email || 'unknown',
           tier:  pollData.tier  || 'free',
         },
-      });
+      };
+
+      // Write into per-profile file when we know the email; mark it active.
+      // Falls back to active-pointer-resolved path otherwise (legacy behavior).
+      if (email) {
+        try {
+          const profileStore = new TokenStore(profileFile(email));
+          await profileStore.saveToken(tokenData);
+          writeActivePointer(email);
+        } catch {
+          await tokenStore.saveToken(tokenData);
+        }
+      } else {
+        await tokenStore.saveToken(tokenData);
+      }
       syncKeyToShellRc(pollData.api_key);
 
       console.log(chalk.green.bold('\n🎉 Connected!\n'));
@@ -750,7 +889,8 @@ async function runStatus() {
     console.log(chalk.cyan('   npx purmemo-mcp setup'));
     return;
   }
-  console.log(chalk.green('✅ Connected via ~/.purmemo/auth.json'));
+  console.log(chalk.green(`✅ Connected — active profile: ${getActiveProfileLabel()}`));
+  console.log(chalk.gray(`   File: ${getActiveTokenFile()}`));
   await testApiKey(token.access_token);
 
   console.log('');
@@ -797,14 +937,136 @@ async function verifyApiKey(apiKey) {
 
 async function runLogout() {
   console.log(chalk.cyan(banner));
+  const info = await tokenStore.getUserInfo();
+  const activeFile = getActiveTokenFile();
+
   const hasToken = await tokenStore.hasToken();
   if (!hasToken) {
-    console.log(chalk.gray('Not connected via local token. Nothing to clear.'));
+    console.log(chalk.gray('Not connected. Nothing to clear.'));
     return;
   }
   await tokenStore.clearToken();
-  console.log(chalk.green('✅ Disconnected. Local token cleared.'));
-  console.log(chalk.gray('Run setup again to reconnect: npx purmemo-mcp setup'));
+
+  // If the active profile was a profile file (not legacy auth.json), also
+  // clear the active pointer so future commands fall back cleanly.
+  const activePtr = readActivePointer();
+  if (activePtr && activeFile.endsWith(`${activePtr}.json`)) {
+    clearActivePointer();
+  }
+
+  // Also remove the legacy auth.json if it holds the same account we just
+  // logged out — otherwise the migrator re-creates the profile on next run
+  // and "logout" appears to do nothing.
+  try {
+    const legacyPath = path.join(os.homedir(), '.purmemo', 'auth.json');
+    const legacyDir = process.env.PURMEMO_CONFIG_DIR || path.dirname(legacyPath);
+    const legacy = path.join(legacyDir, 'auth.json');
+    if (fs.existsSync(legacy)) {
+      const legacyStore = new TokenStore(legacy);
+      const legacyToken = await legacyStore.getToken();
+      const legacyEmail = legacyToken?.user?.email?.trim().toLowerCase();
+      const loggedOutEmail = info?.email?.trim().toLowerCase();
+      if (legacyEmail && loggedOutEmail && legacyEmail === loggedOutEmail) {
+        fs.unlinkSync(legacy);
+      }
+    }
+  } catch { /* non-fatal — leaves legacy file alone */ }
+
+  const who = info?.email ? chalk.cyan(info.email) : chalk.gray('active account');
+  console.log(chalk.green(`✅ Disconnected ${who}.`));
+
+  const remaining = listProfiles();
+  if (remaining.length > 0) {
+    console.log(chalk.gray('\nOther accounts on this machine:'));
+    remaining.forEach(e => console.log(chalk.gray(`  • ${e}`)));
+    console.log(chalk.gray(`\nSwitch to one with: `) + chalk.cyan(`purmemo use <email>`));
+  } else {
+    console.log(chalk.gray('Run setup again to reconnect: ') + chalk.cyan('purmemo init'));
+  }
+}
+
+// ─── Accounts / Use / Remove ──────────────────────────────────────────────────
+
+async function runAccounts() {
+  console.log(chalk.cyan(banner));
+  const profiles = listProfiles();
+  const activeLabel = getActiveProfileLabel();
+
+  if (profiles.length === 0) {
+    console.log(chalk.yellow('No accounts connected.'));
+    console.log(chalk.gray('Connect one with: ') + chalk.cyan('purmemo init'));
+    return;
+  }
+
+  console.log(chalk.bold('Connected accounts:'));
+  for (const email of profiles) {
+    const isActive = activeLabel === email || activeLabel === `${email} (env)`;
+    const marker   = isActive ? chalk.green('●') : chalk.gray('○');
+    const tag      = isActive ? chalk.green(' [active]') : '';
+    console.log(`  ${marker} ${email}${tag}`);
+  }
+
+  if (process.env.PURMEMO_PROFILE) {
+    console.log(chalk.gray(`\nPURMEMO_PROFILE override active for this shell: ${process.env.PURMEMO_PROFILE}`));
+  }
+  console.log(chalk.gray('\nSwitch with: ') + chalk.cyan('purmemo use <email>'));
+  console.log(chalk.gray('Add another: ') + chalk.cyan('purmemo add'));
+}
+
+async function runUse(emailArg) {
+  console.log(chalk.cyan(banner));
+  const email = (emailArg || '').trim().toLowerCase();
+  if (!email) {
+    console.log(chalk.red('Usage: purmemo use <email>'));
+    console.log(chalk.gray('Run `purmemo accounts` to see connected accounts.'));
+    process.exit(1);
+  }
+
+  const profiles = listProfiles();
+  if (!profiles.includes(email)) {
+    console.log(chalk.red(`No connected account for ${email}.`));
+    if (profiles.length > 0) {
+      console.log(chalk.gray('\nConnected accounts:'));
+      profiles.forEach(e => console.log(chalk.gray(`  • ${e}`)));
+    }
+    console.log(chalk.gray('\nConnect a new one with: ') + chalk.cyan('purmemo add'));
+    process.exit(1);
+  }
+
+  writeActivePointer(email);
+  console.log(chalk.green(`✅ Switched to ${email}`));
+  console.log(chalk.gray(
+    '\nNote: New IDE sessions will use this account. Existing MCP server\n' +
+    'processes (already-running Claude Code / Codex / Gemini sessions) keep\n' +
+    'their original account until restart.'
+  ));
+}
+
+async function runRemove(emailArg, force) {
+  console.log(chalk.cyan(banner));
+  const email = (emailArg || '').trim().toLowerCase();
+  if (!email) {
+    console.log(chalk.red('Usage: purmemo remove <email> [--force]'));
+    process.exit(1);
+  }
+
+  const profiles = listProfiles();
+  if (!profiles.includes(email)) {
+    console.log(chalk.yellow(`No connected account for ${email}. Nothing to remove.`));
+    return;
+  }
+
+  const activePtr = readActivePointer();
+  if (activePtr === email && !force) {
+    console.log(chalk.red(`Refusing to remove the active account (${email}).`));
+    console.log(chalk.gray('Switch first: ') + chalk.cyan('purmemo use <other-email>'));
+    console.log(chalk.gray('Or pass --force to remove the active account anyway.'));
+    process.exit(1);
+  }
+
+  fs.unlinkSync(profileFile(email));
+  if (activePtr === email) clearActivePointer();
+  console.log(chalk.green(`✅ Removed ${email}`));
 }
 
 // ─── Util ─────────────────────────────────────────────────────────────────────

@@ -1,11 +1,12 @@
 {
   "name": "purmemo-mcp",
-  "version": "15.5.1",
+  "version": "15.6.0",
   "mcpName": "io.github.purmemo-ai/purmemo",
   "description": "MCP server for pūrmemo - AI conversation memory that works everywhere. Save and recall conversations across Claude Desktop, Cursor, and other MCP-compatible platforms. Intelligent context extraction, smart titles, living documents.",
   "main": "dist/server.js",
   "type": "module",
   "bin": {
+    "purmemo": "./dist/server.js",
     "purmemo-mcp": "./dist/server.js",
     "purmemo-mcp-setup": "./dist/setup.js",
     "purmemo-mcp-hooks": "./dist/setup.js"

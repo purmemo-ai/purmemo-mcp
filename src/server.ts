@@ -99,13 +99,35 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 
-// Route subcommands: `npx purmemo-mcp setup|init|status|logout|hooks` → setup.js
-const _subcommand = process.argv[2];
-if (['setup', 'init', 'status', 'logout', 'hooks'].includes(_subcommand)) {
+// Route subcommands and flags through setup.js. Bare `purmemo` (no args, or
+// only flags like --remote) drops through to start the MCP server, which is
+// how Claude Code / Codex / Gemini invoke it via `npx purmemo-mcp@latest`.
+//
+// A non-flag positional arg that ISN'T a known subcommand is a typo — reject
+// it loudly instead of silently starting the server (the bug from the user's
+// pre-Step-2 screenshot, where `purmemo-mcp logout` on an old version booted
+// the server and looked like a hang).
+const _arg = process.argv[2];
+const _subcommands = new Set([
+  'setup', 'init', 'status', 'logout', 'hooks',
+  'accounts', 'use', 'add', 'remove',
+  'update', 'help',
+  '--update', '--help', '-h',
+]);
+const _serverFlags = new Set(['--remote']);
+if (_arg && _subcommands.has(_arg)) {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const setupPath = path.join(__dirname, 'setup.js');
   import(setupPath).catch(err => { console.error(err); process.exit(1); });
   // setup.js manages its own process lifecycle
+} else if (_arg && !_arg.startsWith('-') && !_serverFlags.has(_arg)) {
+  // Positional non-flag arg that isn't a known subcommand → typo.
+  // Route to setup.js's help path so the user sees the command list.
+  process.argv[2] = 'help';
+  console.error(`Unknown command: ${_arg}\n`);
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const setupPath = path.join(__dirname, 'setup.js');
+  import(setupPath).then(() => process.exit(1)).catch(err => { console.error(err); process.exit(1); });
 } else {
 
 const API_URL = (process.env.PURMEMO_API_URL || 'https://api.purmemo.ai').replace(/\/+$/, '');
@@ -1944,19 +1966,21 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
 // ============================================================================
 
 async function resolveApiKey() {
-  // auth.json is the single source of truth — written by `npx purmemo-mcp setup`
-  // on every login. The PURMEMO_API_KEY env var is no longer read here: it was
-  // the root cause of cross-account saves when a stale key leaked into another
-  // machine's shell environment (ADR-031, 2026-04-24).
+  // The active profile (or legacy auth.json) is the single source of truth —
+  // written by `npx purmemo-mcp setup` / `add`. The PURMEMO_API_KEY env var is
+  // no longer read here: it was the root cause of cross-account saves when a
+  // stale key leaked into another machine's shell environment (ADR-031).
+  // ProfileResolver picks the active file: PURMEMO_PROFILE → active pointer →
+  // legacy auth.json.
   try {
     const tokenStore = new TokenStore();
     const token = await tokenStore.getToken();
     if (token?.access_token) {
-      structuredLog.info('API key resolved from ~/.purmemo/auth.json');
+      structuredLog.info('API key resolved from active profile');
       return token.access_token;
     }
   } catch (err) {
-    structuredLog.warn('Could not read ~/.purmemo/auth.json', { error: err.message });
+    structuredLog.warn('Could not read active profile', { error: err.message });
   }
 
   return null;
@@ -2017,7 +2041,7 @@ if (REMOTE_MODE) {
         tier: '4-resources-prompts',
         api_url: API_URL,
         api_key_configured: !!resolvedApiKey,
-        api_key_source: resolvedApiKey ? 'auth_json' : 'none',
+        api_key_source: resolvedApiKey ? 'profile' : 'none',
         platform: PLATFORM,
         tools_count: TOOLS.length,
         circuit_breaker_enabled: true,

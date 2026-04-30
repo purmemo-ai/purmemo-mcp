@@ -8,15 +8,21 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as os from 'os';
 import type { TokenData, UserInfo, EncryptedPayload } from '../types.js';
+import { getActiveTokenFile, getConfigDir } from './profile-resolver.js';
 
 class TokenStore {
   private configDir: string;
   private tokenFile: string;
   private encryptionKey: Buffer;
 
-  constructor() {
-    this.configDir = path.join(os.homedir(), '.purmemo');
-    this.tokenFile = path.join(this.configDir, 'auth.json');
+  /**
+   * @param tokenFile Optional override for the token file path. When omitted,
+   *   resolves through ProfileResolver — the single chokepoint that future
+   *   multi-account support will hook into. Tests pass an explicit path.
+   */
+  constructor(tokenFile?: string) {
+    this.configDir = getConfigDir();
+    this.tokenFile = tokenFile ?? getActiveTokenFile();
     this.encryptionKey = this.getEncryptionKey();
   }
 
@@ -66,6 +72,9 @@ class TokenStore {
   /** Save token to disk */
   async saveToken(tokenData: TokenData): Promise<void> {
     await this.ensureConfigDir();
+    // Ensure the parent dir of tokenFile exists (e.g. profiles/<email>.json
+    // needs profiles/ to exist when this is the first profile written).
+    await fs.mkdir(path.dirname(this.tokenFile), { recursive: true });
 
     const encrypted = this.encrypt(tokenData);
     await fs.writeFile(

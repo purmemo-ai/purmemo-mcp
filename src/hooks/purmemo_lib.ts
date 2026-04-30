@@ -196,15 +196,52 @@ export function pruneState(state: Record<string, unknown>): Record<string, unkno
 }
 
 // ─── Auth ────────────────────────────────────────────────────────────────────
+// IMPORTANT: This file is copied standalone into ~/.claude/hooks/ at install
+// time and runs without access to node_modules. It cannot import TokenStore.
+// The crypto and path-resolution logic below MUST stay byte-identical to
+// src/auth/token-store.ts and src/auth/profile-resolver.ts. The contract
+// is locked by tests/profile-resolver-contract.test.js — if that test fails,
+// the two read paths have drifted and hooks will silently auth as nobody.
 
 function getEncryptionKey(): Buffer {
   const machineId = os.hostname() + os.userInfo().username;
   return crypto.createHash('sha256').update(machineId).digest();
 }
 
+/** Mirror of profile-resolver.ts:getActiveTokenFile() — see header note.
+ *  Resolution order:
+ *    1. PURMEMO_PROFILE env → profiles/<email>.json
+ *    2. ~/.purmemo/active pointer → profiles/<email>.json (if file exists)
+ *    3. ~/.purmemo/auth.json (legacy fallback)
+ */
+function isSafeProfileName(name: string): boolean {
+  if (!name || name.length > 254) return false;
+  if (name.includes('/') || name.includes('\\') || name.includes('..')) return false;
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(name);
+}
+function getActiveTokenFile(): string {
+  const configDir = process.env.PURMEMO_CONFIG_DIR || path.join(os.homedir(), '.purmemo');
+  const legacy = path.join(configDir, 'auth.json');
+
+  const envProfile = (process.env.PURMEMO_PROFILE || '').trim();
+  if (envProfile && isSafeProfileName(envProfile)) {
+    return path.join(configDir, 'profiles', `${envProfile}.json`);
+  }
+
+  try {
+    const pointer = fs.readFileSync(path.join(configDir, 'active'), 'utf8').trim();
+    if (pointer && isSafeProfileName(pointer)) {
+      const target = path.join(configDir, 'profiles', `${pointer}.json`);
+      if (fs.existsSync(target)) return target;
+    }
+  } catch {}
+
+  return legacy;
+}
+
 export function loadApiKey(): string | null {
   try {
-    const tokenFile = path.join(os.homedir(), '.purmemo', 'auth.json');
+    const tokenFile = getActiveTokenFile();
     if (!fs.existsSync(tokenFile)) return null;
     const encryptedData = JSON.parse(fs.readFileSync(tokenFile, 'utf8'));
     const iv = Buffer.from(encryptedData.iv, 'hex');
