@@ -1,10 +1,10 @@
 # purmemo installer — one-line install for Windows.
 #
 # Usage:
-#   irm https://purmemo.ai/install.ps1 | iex
+#   irm https://app.purmemo.ai/install.ps1 | iex
 #
 # Or inspect first (recommended for the security-conscious):
-#   irm https://purmemo.ai/install.ps1 -OutFile install.ps1
+#   irm https://app.purmemo.ai/install.ps1 -OutFile install.ps1
 #   notepad install.ps1
 #   .\install.ps1
 #

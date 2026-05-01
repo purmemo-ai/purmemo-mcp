@@ -24,13 +24,39 @@ pūrmemo gives your AI a persistent memory and identity layer — your role, exp
 
 ## Quick Start
 
-### One command:
+### macOS / Linux
+
+```bash
+curl -fsSL https://app.purmemo.ai/install | sh
+```
+
+### Windows (PowerShell)
+
+```powershell
+irm https://app.purmemo.ai/install.ps1 | iex
+```
+
+The installer checks for Node.js, installs the `purmemo` CLI, and gets out of the way. Then run:
+
+```bash
+purmemo
+```
+
+This opens your browser to sign in, configures the MCP server, and installs hooks + slash commands (`/save`, `/recall`, `/context`). That's it.
+
+> **Want to inspect the script first?** It's open source — read it at [scripts/install.sh](scripts/install.sh) or download and review locally before running.
+
+### Already have Node? Skip the installer
+
+```bash
+npm install -g purmemo-mcp && purmemo
+```
+
+Or, without a global install:
 
 ```bash
 npx purmemo-mcp@latest init
 ```
-
-This opens your browser to sign in, configures the MCP server, and installs hooks + slash commands (`/save`, `/recall`, `/context`). That's it.
 
 ### Manual Setup (alternative)
 

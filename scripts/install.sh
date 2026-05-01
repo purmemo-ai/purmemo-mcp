@@ -2,10 +2,10 @@
 # purmemo installer — one-line install for macOS and Linux.
 #
 # Usage:
-#   curl -fsSL https://purmemo.ai/install | sh
+#   curl -fsSL https://app.purmemo.ai/install | sh
 #
 # Or inspect first (recommended for the security-conscious):
-#   curl -fsSL https://purmemo.ai/install -o install.sh
+#   curl -fsSL https://app.purmemo.ai/install -o install.sh
 #   less install.sh
 #   sh install.sh
 #
