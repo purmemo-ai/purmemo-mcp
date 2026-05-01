@@ -99,14 +99,20 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 
-// Route subcommands and flags through setup.js. Bare `purmemo` (no args, or
-// only flags like --remote) drops through to start the MCP server, which is
-// how Claude Code / Codex / Gemini invoke it via `npx purmemo-mcp@latest`.
+// Route subcommands and flags through setup.js.
 //
-// A non-flag positional arg that ISN'T a known subcommand is a typo — reject
-// it loudly instead of silently starting the server (the bug from the user's
-// pre-Step-2 screenshot, where `purmemo-mcp logout` on an old version booted
-// the server and looked like a hang).
+// Dispatch:
+//   • Known subcommand (e.g. `purmemo init`)        → setup.js
+//   • Unknown positional arg (e.g. `purmemo lgout`) → setup.js help, exit 1
+//   • Bare `purmemo` from interactive terminal      → setup.js (runs init)
+//   • Bare `purmemo` from MCP client (stdin is not a TTY, e.g. Claude
+//     Desktop / Claude Code spawning via stdio)     → start MCP server
+//   • `purmemo --remote` (or PURMEMO_REMOTE=1)      → start MCP server
+//
+// The "bare interactive" case is the fix for the v15.7.1 UX bug: typing
+// just `purmemo` in a terminal used to dump JSON logs because we always
+// started the server. MCP clients still get the server because they pipe
+// stdin and `process.stdin.isTTY` is undefined.
 const _arg = process.argv[2];
 const _subcommands = new Set([
   'setup', 'init', 'status', 'logout', 'hooks',
@@ -115,6 +121,9 @@ const _subcommands = new Set([
   '--update', '--help', '-h',
 ]);
 const _serverFlags = new Set(['--remote']);
+const _isRemoteMode = process.argv.includes('--remote') || process.env.PURMEMO_REMOTE === '1';
+const _isInteractiveTTY = !!process.stdin.isTTY && !!process.stdout.isTTY;
+
 if (_arg && _subcommands.has(_arg)) {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const setupPath = path.join(__dirname, 'setup.js');
@@ -128,6 +137,12 @@ if (_arg && _subcommands.has(_arg)) {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const setupPath = path.join(__dirname, 'setup.js');
   import(setupPath).then(() => process.exit(1)).catch(err => { console.error(err); process.exit(1); });
+} else if (!_arg && _isInteractiveTTY && !_isRemoteMode) {
+  // Bare `purmemo` typed in a terminal → the user wants to set up, not
+  // start a stdio MCP server. Defer to setup.js which defaults to init.
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const setupPath = path.join(__dirname, 'setup.js');
+  import(setupPath).catch(err => { console.error(err); process.exit(1); });
 } else {
 
 const API_URL = (process.env.PURMEMO_API_URL || 'https://api.purmemo.ai').replace(/\/+$/, '');
