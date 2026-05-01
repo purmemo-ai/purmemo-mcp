@@ -17,6 +17,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 let API_URL = '';
 let _resolveApiKey = () => null;
+let _userAgent = 'purmemo-mcp/unknown'; // overridden by initApiClient
 
 // Per-request API key stored in AsyncLocalStorage — concurrency-safe.
 // Each concurrent request runs in its own async context so keys never bleed
@@ -36,9 +37,19 @@ export function runWithApiKey<T>(key: string, fn: () => Promise<T>): Promise<T> 
   return _requestKeyStore.run(key, fn);
 }
 
-export function initApiClient({ apiUrl, resolveApiKey }) {
+export function initApiClient({ apiUrl, resolveApiKey, clientVersion, installMethod, platform }) {
   API_URL = apiUrl;
   if (resolveApiKey) _resolveApiKey = resolveApiKey;
+  // User-Agent format:
+  //   purmemo-mcp/<version> (install=<global|npx|local|unknown>; platform=<...>)
+  // Backend parses this to track version distribution per user.
+  if (clientVersion) {
+    const parts = [];
+    if (installMethod) parts.push(`install=${installMethod}`);
+    if (platform) parts.push(`platform=${platform}`);
+    const tail = parts.length ? ` (${parts.join('; ')})` : '';
+    _userAgent = `purmemo-mcp/${clientVersion}${tail}`;
+  }
 }
 
 // ============================================================================
@@ -252,6 +263,7 @@ export async function makeApiCall(endpoint, options = {}, apiKeyOverride = null)
         headers: {
           'Authorization': `Bearer ${effectiveKey}`,
           'Content-Type': 'application/json',
+          'User-Agent': _userAgent,
           ...options.headers
         }
       });

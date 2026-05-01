@@ -56,6 +56,7 @@ import {
   extractRelationships
 } from './intelligent-memory.js';
 import TokenStore from './auth/token-store.js';
+import { detectInstallMethod } from './auth/install-detection.js';
 import { structuredLog, logStructured } from './lib/logger.js';
 import {
   initApiClient,
@@ -95,6 +96,7 @@ import {
 import { handleGenerateHandoffBrief } from './tools/handoff.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -147,11 +149,9 @@ if (_arg && _subcommands.has(_arg)) {
 
 const API_URL = (process.env.PURMEMO_API_URL || 'https://api.purmemo.ai').replace(/\/+$/, '');
 
-// Initialize extracted API client with URL + lazy key resolver
-initApiClient({
-  apiUrl: API_URL,
-  resolveApiKey: () => resolvedApiKey
-});
+// API client is initialized below — after CLIENT_VERSION and PLATFORM are
+// computed — so the User-Agent header includes version + install method +
+// platform.
 
 // ============================================================================
 // Version check — runs once on startup, non-blocking
@@ -244,6 +244,31 @@ const detectPlatform = () => {
 };
 
 const PLATFORM = detectPlatform();
+
+// Detect install method (global / npx / local / unknown) for telemetry.
+// Best-effort — only used to populate the User-Agent header.
+let INSTALL_METHOD: string;
+try {
+  const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  let globalRoot: string | null = null;
+  try {
+    const out = execSync('npm root -g', { stdio: ['ignore', 'pipe', 'ignore'], timeout: 1000 });
+    globalRoot = out.toString().trim() || null;
+  } catch { /* npm root -g may fail or be slow — best-effort only */ }
+  INSTALL_METHOD = detectInstallMethod(packageDir, globalRoot);
+} catch {
+  INSTALL_METHOD = 'unknown';
+}
+
+// Initialize extracted API client with URL + lazy key resolver + telemetry
+// fields (version / install method / platform). Surfaces in the User-Agent.
+initApiClient({
+  apiUrl: API_URL,
+  resolveApiKey: () => resolvedApiKey,
+  clientVersion: CLIENT_VERSION,
+  installMethod: INSTALL_METHOD,
+  platform: PLATFORM,
+});
 
 // Admin mode: enables get_acknowledged_errors + save_investigation_result
 // Only enabled when PURMEMO_ADMIN=1 is set in the environment.
