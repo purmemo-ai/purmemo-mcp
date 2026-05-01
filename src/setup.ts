@@ -21,7 +21,9 @@ import TokenStore from './auth/token-store.js';
 import {
   getActiveTokenFile,
   getActiveProfileLabel,
+  getConfigDir,
   getProfilesDir,
+  getLegacyTokenFile,
   profileFile,
   listProfiles,
   readActivePointer,
@@ -67,6 +69,8 @@ switch (command) {
   case 'setup':
   case 'init':     await runSetup();  break;
   case 'status':   await runStatus(); break;
+  case 'where':    runWhere(); break;
+  case 'uninstall':await runUninstall(process.argv.includes('--yes')); break;
   case 'logout':   await runLogout(); break;
   case 'hooks':    await runHooksOnly(); break;
   case 'accounts': await runAccounts(); break;
@@ -91,13 +95,15 @@ function runHelp() {
   console.log(chalk.bold('Commands:'));
   console.log('  init               Connect an account and install hooks (default)');
   console.log('  status             Show the active account and connection health');
+  console.log('  where              Show where your config lives (paths + active source)');
   console.log('  accounts           List all connected accounts');
   console.log('  add                Connect another account (keeps existing accounts)');
   console.log('  use <email>        Switch the active account');
   console.log('  remove <email>     Remove a connected account');
   console.log('  logout             Disconnect the active account');
   console.log('  hooks              Reinstall hooks only');
-  console.log('  update             Clear the npx cache so next run picks up the latest version');
+  console.log('  update             Self-upgrade to the latest published version');
+  console.log('  uninstall          Show how to fully remove purmemo from this machine');
   console.log('  help               Show this message');
   console.log('');
   console.log(chalk.bold('Environment:'));
@@ -964,20 +970,182 @@ async function runStatus() {
   if (!token?.access_token) {
     console.log(chalk.yellow('⚠️  Not connected'));
     console.log(chalk.gray('\nRun setup to connect:'));
-    console.log(chalk.cyan('   npx purmemo-mcp setup'));
+    console.log(chalk.cyan('   purmemo init'));
     return;
   }
   console.log(chalk.green(`✅ Connected — active profile: ${getActiveProfileLabel()}`));
   console.log(chalk.gray(`   File: ${getActiveTokenFile()}`));
   await testApiKey(token.access_token);
 
+  // Surface the env-var-vs-profile situation. Even though ADR-031 removed
+  // PURMEMO_API_KEY from runtime read paths, lots of users still have it set
+  // from the old install instructions. If it's set AND a profile exists, the
+  // user probably thinks they're switching profiles when they aren't.
+  if (process.env.PURMEMO_API_KEY && listProfiles().length > 0) {
+    console.log('');
+    console.log(chalk.yellow('⚠️  PURMEMO_API_KEY is set in your environment.'));
+    console.log(chalk.gray('   This is a legacy override. New code reads from profiles, but other'));
+    console.log(chalk.gray('   tools (older hooks, scripts) may still pick up the env var. Clear it:'));
+    console.log(chalk.cyan('   unset PURMEMO_API_KEY    ') + chalk.gray('# (or remove it from ~/.zshrc / ~/.bashrc)'));
+  }
+
+  if (process.env.PURMEMO_PROFILE) {
+    console.log(chalk.gray(`\nPURMEMO_PROFILE=${process.env.PURMEMO_PROFILE} is set in your shell — overrides the active pointer here only.`));
+  }
+
   console.log('');
   if (hooksAlreadyInstalled()) {
     console.log(chalk.green('✅ Claude Code hooks installed'));
   } else {
     console.log(chalk.yellow('⚠️  Claude Code hooks not installed'));
-    console.log(chalk.gray('   Run: npx purmemo-mcp hooks'));
+    console.log(chalk.gray('   Run: purmemo hooks'));
   }
+}
+
+// ─── Where ────────────────────────────────────────────────────────────────────
+//
+// Quick "where does my config live" command. Designed to be the first thing
+// you reach for when something feels off — answers "is this account I think
+// is active actually active, and where is it on disk?"
+
+function runWhere() {
+  console.log(chalk.cyan(banner));
+
+  const configDir   = getConfigDir();
+  const activeFile  = getActiveTokenFile();
+  const legacyFile  = getLegacyTokenFile();
+  const activePtr   = readActivePointer();
+  const profiles    = listProfiles();
+
+  // Determine where the active token *actually* comes from.
+  let source: string;
+  if (process.env.PURMEMO_PROFILE) {
+    source = `env: PURMEMO_PROFILE=${process.env.PURMEMO_PROFILE}`;
+  } else if (activePtr && fs.existsSync(profileFile(activePtr))) {
+    source = `profile pointer (${activePtr})`;
+  } else if (fs.existsSync(legacyFile)) {
+    source = 'legacy auth.json (pre-v15.6)';
+  } else {
+    source = 'nothing connected';
+  }
+
+  console.log(chalk.bold('Active source:'));
+  console.log(`  ${chalk.cyan(source)}`);
+  console.log(`  ${chalk.gray('→')} ${activeFile}`);
+
+  console.log('');
+  console.log(chalk.bold('On disk:'));
+  console.log(`  ${chalk.gray('config dir:')}  ${configDir}`);
+  console.log(`  ${chalk.gray('profiles:')}    ${profiles.length === 0 ? chalk.gray('(none)') : profiles.join(', ')}`);
+  console.log(`  ${chalk.gray('active ptr:')}  ${activePtr || chalk.gray('(unset)')}`);
+  console.log(`  ${chalk.gray('legacy:')}      ${fs.existsSync(legacyFile) ? legacyFile : chalk.gray('(none)')}`);
+
+  // Env-var transparency — these are the levers that change behavior.
+  const envFlags: [string, string | undefined][] = [
+    ['PURMEMO_API_KEY',  process.env.PURMEMO_API_KEY ? '(set — see warning below)' : undefined],
+    ['PURMEMO_PROFILE',  process.env.PURMEMO_PROFILE],
+    ['PURMEMO_API_URL',  process.env.PURMEMO_API_URL],
+    ['PURMEMO_REMOTE',   process.env.PURMEMO_REMOTE],
+    ['PURMEMO_ADMIN',    process.env.PURMEMO_ADMIN],
+    ['MCP_PLATFORM',     process.env.MCP_PLATFORM],
+  ];
+  const setFlags = envFlags.filter(([, v]) => v !== undefined);
+  if (setFlags.length > 0) {
+    console.log('');
+    console.log(chalk.bold('Environment overrides:'));
+    for (const [k, v] of setFlags) {
+      console.log(`  ${chalk.gray(k.padEnd(18))}${v}`);
+    }
+  }
+
+  if (process.env.PURMEMO_API_KEY && profiles.length > 0) {
+    console.log('');
+    console.log(chalk.yellow('⚠️  PURMEMO_API_KEY is set, but you also have profiles.'));
+    console.log(chalk.gray('   The MCP server reads from profiles. Older tools and shell scripts'));
+    console.log(chalk.gray('   may still read the env var. Unset it to use the profile system cleanly:'));
+    console.log(chalk.cyan('   unset PURMEMO_API_KEY'));
+  }
+}
+
+// ─── Uninstall ────────────────────────────────────────────────────────────────
+//
+// We can't safely uninstall the npm package from inside a process the npm
+// package owns — the user would be deleting the program currently running.
+// Instead: print exact teardown commands, and offer to clear the local config
+// (~/.purmemo) interactively.
+
+async function runUninstall(autoYes: boolean) {
+  console.log(chalk.cyan(banner));
+
+  const installMethod = detectCurrentInstallMethod();
+  const configDir = getConfigDir();
+  const configExists = fs.existsSync(configDir);
+
+  console.log(chalk.bold('To fully remove purmemo from this machine:\n'));
+
+  console.log(chalk.gray('1. Disconnect Claude clients (optional — leaves them with a dead server):'));
+  console.log(chalk.cyan('   claude mcp remove purmemo') + chalk.gray('   # if you used Claude Code CLI'));
+  console.log(chalk.gray('   For Claude Desktop / Cursor / Windsurf: open Settings and remove the purmemo entry.\n'));
+
+  console.log(chalk.gray('2. Uninstall the CLI:'));
+  switch (installMethod) {
+    case 'global':
+      console.log(chalk.cyan('   npm uninstall -g purmemo-mcp'));
+      break;
+    case 'npx':
+      console.log(chalk.cyan('   rm -rf ~/.npm/_npx') + chalk.gray('   # purges the npx cache'));
+      break;
+    case 'local':
+      console.log(chalk.cyan('   npm uninstall purmemo-mcp') + chalk.gray('   # in your project dir'));
+      break;
+    default:
+      console.log(chalk.gray('   Could not detect install method. If installed globally:'));
+      console.log(chalk.cyan('   npm uninstall -g purmemo-mcp'));
+  }
+  console.log('');
+
+  console.log(chalk.gray('3. Remove Claude Code hooks (if installed):'));
+  console.log(chalk.cyan(`   rm -f ${HOOK_SCRIPTS.map(f => path.join(HOOKS_DIR, f)).join(' \\\n         ')}`));
+  console.log(chalk.cyan(`   rm -f ${COMMAND_FILES.map(f => path.join(COMMANDS_DIR, f)).join(' \\\n         ')}`));
+  console.log(chalk.gray('   (You\'ll also want to remove the SessionStart and UserPromptSubmit'));
+  console.log(chalk.gray(`    bindings from ${SETTINGS_FILE} manually.)\n`));
+
+  if (configExists) {
+    console.log(chalk.bold('4. Local config:'));
+    console.log(chalk.gray(`   ${configDir} holds your encrypted profile tokens.`));
+    let shouldClear = autoYes;
+    if (!autoYes && process.stdin.isTTY) {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const ans = await rl.question(chalk.cyan('   Clear it now? [y/N] '));
+      rl.close();
+      shouldClear = ans.trim().toLowerCase() === 'y';
+    }
+    if (shouldClear) {
+      try {
+        fs.rmSync(configDir, { recursive: true, force: true });
+        console.log(chalk.green(`   ✅ Removed ${configDir}`));
+      } catch (err: any) {
+        console.log(chalk.red(`   Failed to remove: ${err.message}`));
+        console.log(chalk.gray(`   Remove manually: rm -rf ${configDir}`));
+      }
+    } else {
+      console.log(chalk.gray(`   To remove later: ${chalk.cyan('rm -rf ' + configDir)}`));
+    }
+  } else {
+    console.log(chalk.bold('4. Local config:'));
+    console.log(chalk.gray(`   No config at ${configDir} — already clean.`));
+  }
+
+  if (process.env.PURMEMO_API_KEY) {
+    console.log('');
+    console.log(chalk.bold('5. Environment:'));
+    console.log(chalk.gray('   PURMEMO_API_KEY is set in your environment. Remove it from'));
+    console.log(chalk.gray('   ~/.zshrc or ~/.bashrc, then run:'));
+    console.log(chalk.cyan('   unset PURMEMO_API_KEY'));
+  }
+
+  console.log('');
+  console.log(chalk.gray('Done. Thanks for trying purmemo.'));
 }
 
 async function testApiKey(apiKey) {

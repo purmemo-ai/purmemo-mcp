@@ -115,7 +115,7 @@ import os from 'os';
 // stdin and `process.stdin.isTTY` is undefined.
 const _arg = process.argv[2];
 const _subcommands = new Set([
-  'setup', 'init', 'status', 'logout', 'hooks',
+  'setup', 'init', 'status', 'where', 'uninstall', 'logout', 'hooks',
   'accounts', 'use', 'add', 'remove',
   'update', 'help',
   '--update', '--help', '-h',
@@ -1992,6 +1992,17 @@ async function resolveApiKey() {
     const token = await tokenStore.getToken();
     if (token?.access_token) {
       structuredLog.info('API key resolved from active profile');
+
+      // Loud warning if the user *also* has PURMEMO_API_KEY in their env. We
+      // ignore it here (ADR-031) but older hooks / shell scripts may pick it
+      // up and act on a stale key. The warning shows up once per startup.
+      if (process.env.PURMEMO_API_KEY) {
+        structuredLog.warn('PURMEMO_API_KEY is set in env but ignored at runtime — recommend `unset PURMEMO_API_KEY` to avoid stale-key bugs in older tools', {
+          adr: 'ADR-031',
+          recommended_action: 'unset PURMEMO_API_KEY'
+        });
+      }
+
       return token.access_token;
     }
   } catch (err) {
