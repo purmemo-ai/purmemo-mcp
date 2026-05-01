@@ -135,68 +135,115 @@ async function runUpdate() {
   console.log(chalk.gray(`   Install:   ${installMethod}`));
   console.log('');
 
-  if (latest && latest === installedVersion) {
-    console.log(chalk.green('✅ You are on the latest version.'));
-    return;
-  }
+  // Step 1: bring the package itself up to latest if needed.
+  let upgradeAttempted = false;
   if (!latest) {
-    console.log(chalk.yellow('Could not check npm registry. Try again with internet access.'));
-    return;
-  }
-
-  // Need to actually upgrade.
-  if (installMethod === 'global') {
-    console.log(chalk.cyan(`Upgrading global install to v${latest}…`));
-    const spinner = ora('Running: npm i -g purmemo-mcp@latest').start();
-    try {
-      execSync('npm i -g purmemo-mcp@latest', { stdio: 'pipe' });
-      spinner.stop();
-      console.log(chalk.green(`✅ Upgraded to v${latest}`));
-      console.log(chalk.gray('   Run `purmemo accounts` to verify.'));
-    } catch (err) {
-      spinner.stop();
-      const stderr = (err as { stderr?: Buffer }).stderr?.toString() || (err as Error).message;
-      console.log(chalk.red('❌ Upgrade failed.'));
-      if (stderr.includes('EACCES') || stderr.includes('permission')) {
-        console.log(chalk.gray('   This usually means npm needs sudo on your system.'));
-        console.log(chalk.cyan('   Try: sudo npm i -g purmemo-mcp@latest'));
-      } else {
-        console.log(chalk.gray(`   ${stderr.split('\n')[0]}`));
-        console.log(chalk.cyan('   Try manually: npm i -g purmemo-mcp@latest'));
-      }
-    }
-    return;
-  }
-
-  if (installMethod === 'npx') {
-    const npxCache = path.join(os.homedir(), '.npm', '_npx');
-    if (fs.existsSync(npxCache)) {
+    console.log(chalk.yellow('Could not check npm registry — keeping current version.'));
+  } else if (latest === installedVersion) {
+    console.log(chalk.gray('Package is already current.'));
+  } else {
+    upgradeAttempted = true;
+    if (installMethod === 'global') {
+      console.log(chalk.cyan(`Upgrading global install to v${latest}…`));
+      const spinner = ora('Running: npm i -g purmemo-mcp@latest').start();
       try {
-        fs.rmSync(npxCache, { recursive: true, force: true });
-        console.log(chalk.green(`✅ npx cache cleared. Next \`npx purmemo-mcp@latest\` will fetch v${latest}.`));
+        execSync('npm i -g purmemo-mcp@latest', { stdio: 'pipe' });
+        spinner.stop();
+        console.log(chalk.green(`✅ Upgraded to v${latest}`));
       } catch (err) {
-        console.log(chalk.yellow(`⚠️  Could not clear npx cache: ${(err as Error).message}`));
-        console.log(chalk.gray(`   You can clear it manually: rm -rf ${npxCache}`));
+        spinner.stop();
+        const stderr = (err as { stderr?: Buffer }).stderr?.toString() || (err as Error).message;
+        console.log(chalk.red('❌ Upgrade failed.'));
+        if (stderr.includes('EACCES') || stderr.includes('permission')) {
+          console.log(chalk.gray('   This usually means npm needs sudo on your system.'));
+          console.log(chalk.cyan('   Try: sudo npm i -g purmemo-mcp@latest'));
+        } else {
+          console.log(chalk.gray(`   ${stderr.split('\n')[0]}`));
+          console.log(chalk.cyan('   Try manually: npm i -g purmemo-mcp@latest'));
+        }
+        // Don't return — still run the reconciliation pass on the old binary.
       }
+    } else if (installMethod === 'npx') {
+      const npxCache = path.join(os.homedir(), '.npm', '_npx');
+      if (fs.existsSync(npxCache)) {
+        try {
+          fs.rmSync(npxCache, { recursive: true, force: true });
+          console.log(chalk.green(`✅ npx cache cleared — next run fetches v${latest}.`));
+        } catch (err) {
+          console.log(chalk.yellow(`⚠️  Could not clear npx cache: ${(err as Error).message}`));
+          console.log(chalk.gray(`   You can clear it manually: rm -rf ${npxCache}`));
+        }
+      } else {
+        console.log(chalk.gray(`No npx cache to clear. Next run fetches v${latest}.`));
+      }
+    } else if (installMethod === 'local') {
+      console.log(chalk.cyan('This is a local project install.'));
+      console.log(chalk.gray(`   Bump purmemo-mcp to ^${latest} in your package.json, then:`));
+      console.log(chalk.cyan('   npm install'));
     } else {
-      console.log(chalk.gray('No npx cache to clear.'));
-      console.log(chalk.green(`Next \`npx purmemo-mcp@latest\` will fetch v${latest}.`));
+      console.log(chalk.cyan(`v${latest} is available. Update manually:`));
+      console.log(chalk.gray('   • Global: ') + chalk.cyan('npm i -g purmemo-mcp@latest'));
     }
-    return;
   }
 
-  if (installMethod === 'local') {
-    console.log(chalk.cyan('This is a local project install.'));
-    console.log(chalk.gray(`   Bump purmemo-mcp to ^${latest} in your package.json, then:`));
-    console.log(chalk.cyan('   npm install'));
-    return;
-  }
+  // Step 2: reconcile the rest of the installation regardless of whether we
+  // upgraded the package. A user on the latest version may still have stale
+  // hooks, a legacy auth.json, or a `PURMEMO_API_KEY=` line in their shell
+  // config. `--update` should bring everything to the current shape.
+  console.log('');
+  await reconcileInstallation();
+}
 
-  // unknown — running from source, mcpb bundle, or a setup we don't recognize.
-  console.log(chalk.cyan(`v${latest} is available. Update manually:`));
-  console.log(chalk.gray('   • Global install: ') + chalk.cyan('npm i -g purmemo-mcp@latest'));
-  console.log(chalk.gray('   • npx users:      ') + chalk.cyan('purmemo --update'));
-  console.log(chalk.gray('   • From source:    pull the repo and rebuild'));
+// Bring the local installation in line with what the current package version
+// expects. Idempotent — every step is a no-op when there's nothing to do.
+//
+// Three steps, all silent unless they actually do something:
+//   1. Migrate legacy ~/.purmemo/auth.json → profiles/<email>.json
+//   2. Refresh Claude Code hooks if their stamped version is below the
+//      installed package version (or unstamped/dev)
+//   3. Comment out `export PURMEMO_API_KEY=...` lines in shell rc files
+async function reconcileInstallation(): Promise<void> {
+  const summary: string[] = [];
+
+  // --- 1. Migrate legacy auth.json --------------------------------------------
+  try {
+    const result = await migrateLegacyAuthIfNeeded();
+    if (result.status === 'migrated' && result.email) {
+      summary.push(`Migrated legacy auth.json → profile for ${result.email}`);
+    }
+  } catch { /* migrator handles its own errors; nothing to add */ }
+
+  // --- 2. Refresh hooks if outdated -------------------------------------------
+  // Only attempt if hooks are already installed (we don't want `--update` to
+  // install hooks for the first time on a brand-new machine — that's `init`'s
+  // job). And only if their stamped HOOKS_VERSION is below this package's.
+  try {
+    if (HOOK_SCRIPTS.every(f => fs.existsSync(path.join(HOOKS_DIR, f))) && hooksOutdated()) {
+      await installHooks();
+      summary.push('Refreshed Claude Code hooks');
+    }
+  } catch { /* non-fatal — show nothing rather than partial state */ }
+
+  // --- 3. Scrub PURMEMO_API_KEY from shell configs ----------------------------
+  try {
+    const edits = scrubShellConfigKey();
+    if (edits.length > 0) {
+      const detail = edits.map(e => `${e.file}:${e.line}`).join(', ');
+      summary.push(`Cleaned up legacy PURMEMO_API_KEY: ${detail} (commented out, revertible)`);
+    }
+  } catch { /* non-fatal */ }
+
+  // --- Output -----------------------------------------------------------------
+  if (summary.length === 0) {
+    console.log(chalk.green('✅ You\'re all set.'));
+  } else {
+    console.log(chalk.bold('Cleaned up:'));
+    for (const item of summary) {
+      console.log(chalk.gray(`   • ${item}`));
+    }
+    console.log('');
+    console.log(chalk.green('✅ You\'re all set.'));
+  }
 }
 
 function readInstalledVersion(): string {
@@ -717,29 +764,60 @@ function patchSettings() {
 
 // ─── Sync API key to shell rc files so hooks always use the current key ───────
 
-function syncKeyToShellRc(apiKey: string) {
+// Retired in v15.7.5: this function used to write `export PURMEMO_API_KEY=...`
+// into ~/.zshrc and ~/.bashrc during setup. ADR-031 made the env var a runtime
+// no-op, but the export lines stuck around in users' shell configs and kept
+// surfacing the "PURMEMO_API_KEY is set" warning forever.
+//
+// We keep the function name as a no-op so the rest of setup.ts continues to
+// compile if any caller is missed during the rollout. The actual cleanup of
+// existing entries lives in scrubShellConfigKey() (called from runUpdate).
+function syncKeyToShellRc(_apiKey: string) {
+  // Intentional no-op. See header comment.
+}
+
+// Find any `export PURMEMO_API_KEY=...` lines in the user's shell config files
+// and comment them out with a dated marker. Reversible: the user can open the
+// file, remove the leading "# Removed by purmemo update YYYY-MM-DD: ", and
+// the line is back.
+//
+// Returns a list of {file, lineNumber, before} for the runUpdate summary.
+function scrubShellConfigKey(): Array<{ file: string; line: number }> {
   const rcFiles = [
     path.join(os.homedir(), '.zshrc'),
     path.join(os.homedir(), '.bashrc'),
+    path.join(os.homedir(), '.zprofile'),
+    path.join(os.homedir(), '.bash_profile'),
   ];
-  const exportLine = `export PURMEMO_API_KEY=${apiKey}`;
-  const marker = 'PURMEMO_API_KEY=';
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const marker = `# Removed by purmemo update ${today}: `;
+  const edits: Array<{ file: string; line: number }> = [];
+
+  // A line we should comment out: `export PURMEMO_API_KEY=...` — also tolerate
+  // leading whitespace and quoted values. Anything already commented or already
+  // marked by us is skipped.
+  const targetRegex = /^\s*export\s+PURMEMO_API_KEY\s*=/;
 
   for (const rcFile of rcFiles) {
     if (!fs.existsSync(rcFile)) continue;
     try {
       const content = fs.readFileSync(rcFile, 'utf8');
       const lines = content.split('\n');
-      const idx = lines.findIndex(l => l.includes(marker));
-      if (idx !== -1) {
-        if (lines[idx] === exportLine) continue; // already current
-        lines[idx] = exportLine;
+      let changed = false;
+      for (let i = 0; i < lines.length; i++) {
+        const raw = lines[i];
+        if (raw.startsWith('#')) continue; // already commented (by us or anyone)
+        if (!targetRegex.test(raw)) continue;
+        lines[i] = `${marker}${raw}`;
+        edits.push({ file: rcFile, line: i + 1 });
+        changed = true;
+      }
+      if (changed) {
         fs.writeFileSync(rcFile, lines.join('\n'), 'utf8');
       }
-      // If not found, don't add it — only update existing entries to avoid
-      // writing to rc files the user hasn't opted into
-    } catch { /* non-fatal */ }
+    } catch { /* non-fatal — skip unreadable rc files */ }
   }
+  return edits;
 }
 
 // ─── Wire MCP server into Claude Code ─────────────────────────────────────────
