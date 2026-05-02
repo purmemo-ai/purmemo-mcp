@@ -65,6 +65,16 @@ const command = process.argv[2] || 'setup';
 // Idempotent: no-op once migrated, no-op on fresh installs.
 await migrateLegacyAuthIfNeeded();
 
+// One-time shell-config scrub. The reconciliation pass in `--update` only
+// helps users who *upgrade* to v15.7.5+; users who upgraded straight from
+// v15.7.4 → v15.7.5 ran the v15.7.4 update code which knew nothing about
+// reconciliation. This catch-up runs once on the first CLI invocation of
+// v15.7.6+, then writes a sentinel file so subsequent runs no-op.
+//
+// Silent unless something was actually scrubbed — keeps `purmemo`,
+// `purmemo status`, etc. visually unchanged for users with clean shells.
+await runOneTimeShellScrubIfNeeded();
+
 switch (command) {
   case 'setup':
   case 'init':     await runSetup();  break;
@@ -774,6 +784,34 @@ function patchSettings() {
 // existing entries lives in scrubShellConfigKey() (called from runUpdate).
 function syncKeyToShellRc(_apiKey: string) {
   // Intentional no-op. See header comment.
+}
+
+// Run scrubShellConfigKey() exactly once across all CLI commands. After it
+// runs, write a sentinel file so we never look at shell configs again.
+// Silent unless something was actually scrubbed.
+//
+// The sentinel name encodes the version that introduced this catch-up so
+// future cleanups (different env vars, different files) can use new sentinels
+// without re-running this one.
+async function runOneTimeShellScrubIfNeeded(): Promise<void> {
+  const configDir = process.env.PURMEMO_CONFIG_DIR || path.join(os.homedir(), '.purmemo');
+  const sentinel = path.join(configDir, '.scrubbed-shell-config-v15-7-6');
+  if (fs.existsSync(sentinel)) return;
+
+  try {
+    const edits = scrubShellConfigKey();
+    if (edits.length > 0) {
+      const detail = edits.map(e => `${e.file}:${e.line}`).join(', ');
+      console.log(chalk.gray(`(cleaned up legacy PURMEMO_API_KEY: ${detail} — commented out, revertible)`));
+    }
+  } catch { /* non-fatal — never block a CLI command on cleanup */ }
+
+  // Always write the sentinel, even if scrub failed or found nothing — we
+  // don't want to keep retrying unnecessary work on every command.
+  try {
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(sentinel, new Date().toISOString(), 'utf8');
+  } catch { /* best-effort sentinel — if we can't write, we'll just retry next run */ }
 }
 
 // Find any `export PURMEMO_API_KEY=...` lines in the user's shell config files
