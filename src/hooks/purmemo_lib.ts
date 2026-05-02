@@ -553,8 +553,20 @@ export async function checkForUpdate(): Promise<string | null> {
 const AUTO_UPDATE_COOLDOWN = 6 * 60 * 60 * 1000; // at most once per 6 hours
 
 /**
- * Auto-update hooks by running `npx purmemo-mcp@latest hooks` in the background.
- * Returns true if an update was triggered, false otherwise.
+ * Auto-update purmemo in the background by running `npx purmemo-mcp@latest
+ * --update`. This is the silent universal updater — works for users who
+ * installed via `curl … | sh` (have global `purmemo` bin) AND users who
+ * installed via `npx purmemo-mcp@latest setup` (no global bin) because npx
+ * resolves whether or not the bin is on PATH.
+ *
+ * `--update` runs the full reconciliation pass introduced in v15.7.5+:
+ *   1. Upgrade the npm package itself
+ *   2. Refresh hooks if outdated (this file replaces itself)
+ *   3. Migrate legacy auth.json → profiles
+ *   4. Scrub `export PURMEMO_API_KEY=…` from shell rc files
+ *
+ * After one hook fire, even old (pre-v15.7) users land on the current shape
+ * of the install. Returns true if an update was triggered, false otherwise.
  * Never blocks — fires and forgets with a 30s timeout.
  */
 export async function autoUpdateHooks(): Promise<boolean> {
@@ -573,7 +585,7 @@ export async function autoUpdateHooks(): Promise<boolean> {
 
   try {
     const { spawn } = await import('node:child_process');
-    const child = spawn('npx', ['purmemo-mcp@latest', 'hooks'], {
+    const child = spawn('npx', ['-y', 'purmemo-mcp@latest', '--update'], {
       timeout: 30_000,
       stdio: 'ignore',
       detached: true,

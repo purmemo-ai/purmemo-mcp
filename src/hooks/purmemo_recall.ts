@@ -212,8 +212,8 @@ async function main(): Promise<void> {
     // Try auto-update in background (at most once per 6h)
     const triggered = await autoUpdateHooks();
     updateNotice = triggered
-      ? `\npurmemo hooks updating ${HOOKS_VERSION} → ${latestVersion}… (will apply next session)\n`
-      : `\npurmemo hooks ${HOOKS_VERSION} → ${latestVersion} available. Run: npx purmemo-mcp@latest init\n`;
+      ? `\npurmemo updating ${HOOKS_VERSION} → ${latestVersion}… (will apply next session)\n`
+      : `\npurmemo ${HOOKS_VERSION} → ${latestVersion} available. Run: npx purmemo-mcp@latest --update\n`;
   }
 
   // Output: numbered list visible to user, full context silent to Claude
