@@ -20,6 +20,7 @@ import {
   dbg, errLog, readState, writeState, pruneState, loadApiKey,
   apiGet, apiPost, readHookInput,
   checkForUpdate, autoUpdateHooks, HOOKS_VERSION,
+  getAccountSnapshot, type AccountSnapshot, type UsageBucket,
   detectPlatform, initPlatformPaths, platformEvent,
 } from './purmemo_lib.js';
 
@@ -37,6 +38,88 @@ function relativeTime(date: Date): string {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   return `${days}d ago`;
+}
+
+// ── Header renderer ─────────────────────────────────────────────────────────
+// Two-line header above the recall list, modeled on Claude Code's banner.
+//
+//   pūrmemo v15.7.8 · chris@purmemo.ai · Pro · 3,205 memories
+//   This cycle: 14 recalls · 0 workflows · 287 captures (resets May 31)
+//
+// Free users with no quota hits show usage with /limits:
+//   This cycle: 8/50 recalls · 0/5 workflows · 287 captures (resets May 31)
+//
+// Free users at-or-over a cap get an upsell line instead of usage:
+//   ⚡ Recalls 50/50 — upgrade for unlimited: app.purmemo.ai/dashboard?modal=plans
+
+const UPGRADE_URL = 'https://app.purmemo.ai/dashboard?modal=plans';
+
+function tierDisplayName(tier: string): string {
+  if (tier === 'pro') return 'Pro';
+  if (tier === 'teams') return 'Teams';
+  return 'Free';
+}
+
+function formatCount(n: number): string {
+  return n.toLocaleString('en-US');
+}
+
+function formatCycleEnd(iso: string | null): string {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return ` (resets ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`;
+  } catch { return ''; }
+}
+
+// Pick the first capacity that's at-or-over its limit, in priority order.
+// Pro/Teams have unlimited everything, so this is only meaningful for Free.
+function firstHitCap(snap: AccountSnapshot): { name: string; bucket: UsageBucket } | null {
+  const checks: Array<[string, UsageBucket]> = [
+    ['Recalls', snap.recalls],
+    ['Workflows', snap.workflows],
+    ['Captures', snap.captures],
+  ];
+  for (const [name, b] of checks) {
+    if (!b.unlimited && b.limit > 0 && b.count >= b.limit) {
+      return { name, bucket: b };
+    }
+  }
+  return null;
+}
+
+function renderUsageLine(snap: AccountSnapshot): string {
+  // Each counter renders as "X/L name" if limited, or "X name" if unlimited.
+  // Captures stay visible even on Pro because they're a usage flex — the
+  // user wants to see "287 captures this cycle" grow over time.
+  const part = (label: string, b: UsageBucket): string => {
+    return b.unlimited ? `${formatCount(b.count)} ${label}` : `${formatCount(b.count)}/${formatCount(b.limit)} ${label}`;
+  };
+  const segments = [
+    part('recalls', snap.recalls),
+    part('workflows', snap.workflows),
+    part('captures', snap.captures),
+  ];
+  return `This cycle: ${segments.join(' · ')}${formatCycleEnd(snap.cycle_end)}`;
+}
+
+export function renderSessionHeader(snap: AccountSnapshot): string {
+  const tier = tierDisplayName(snap.tier);
+  const email = snap.email ?? 'unknown';
+  const totalMem = formatCount(snap.total_memories);
+  const line1 = `pūrmemo v${HOOKS_VERSION} · ${email} · ${tier} · ${totalMem} memories`;
+
+  // Free user with a hit cap → upsell line replaces usage.
+  if (snap.tier === 'free') {
+    const hit = firstHitCap(snap);
+    if (hit) {
+      const line2 = `⚡ ${hit.name} ${formatCount(hit.bucket.count)}/${formatCount(hit.bucket.limit)} — upgrade for unlimited: ${UPGRADE_URL}`;
+      return `${line1}\n${line2}`;
+    }
+  }
+
+  return `${line1}\n${renderUsageLine(snap)}`;
 }
 
 // ── Handoff Brief Composer ──────────────────────────────────────────────────
@@ -167,19 +250,23 @@ async function main(): Promise<void> {
     project: projectName, platform: platformName, auto: true,
   }, 5000).then(r => dbg(TAG, `session POST → ${r ? 'ok' : 'error'}`));
 
-  // Fetch recent memories + active todos in parallel
+  // Fetch recent memories + active todos + account snapshot in parallel.
+  // The account snapshot (tier + usage counters) is fetched live every
+  // session — caching would lie to users about quota state and capture
+  // counts. Parallel with memory fetch means ~0ms added wall-clock cost.
   const params = new URLSearchParams({
     limit: String(MAX_MEMORIES),
     sort: 'user_updated_at',
     order: 'desc',
   });
-  const [memResult, todosResult] = await Promise.all([
+  const [memResult, todosResult, account] = await Promise.all([
     apiGet(apiKey, `/api/v1/memories/?${params}`),
     apiGet(apiKey, `/api/v1/todos?limit=${MAX_TODOS}`).catch(() => null),
+    getAccountSnapshot(apiKey),
   ]);
   const memories = (memResult as { memories?: Array<Record<string, unknown>> })?.memories || [];
   const todos = (Array.isArray(todosResult) ? todosResult : (todosResult as { todos?: Array<Record<string, unknown>> })?.todos) || [];
-  dbg(TAG, `recalled ${memories.length} memories, ${todos.length} todos`);
+  dbg(TAG, `recalled ${memories.length} memories, ${todos.length} todos, account=${account?.tier ?? 'unknown'}`);
 
   if (!memories.length) { dbg(TAG, 'no memories found'); return; }
 
@@ -216,7 +303,13 @@ async function main(): Promise<void> {
       : `\npurmemo ${HOOKS_VERSION} → ${latestVersion} available. Run: npx purmemo-mcp@latest --update\n`;
   }
 
-  // Output: numbered list visible to user, full context silent to Claude
+  // Render the header (tier + usage). Falls back to no header if the account
+  // snapshot couldn't load — never block session start on a stale telemetry
+  // call. Keeps the existing memory list rendering exactly as-is.
+  const header = account ? renderSessionHeader(account) : '';
+  const headerBlock = header ? `${header}\n\n` : '';
+
+  // Numbered list visible to user, full context silent to Claude
   const banner = memories
     .map((m, i) => `${i + 1}. ${(m.title as string) || 'Untitled'}`)
     .join('\n');
@@ -226,7 +319,7 @@ async function main(): Promise<void> {
       hookEventName: platformEvent('SessionStart', platform),
       additionalContext: contextLines.join('\n'),
     },
-    systemMessage: `${updateNotice}${banner}\n\nType a number to load a memory.`,
+    systemMessage: `${updateNotice}${headerBlock}${banner}\n\nType a number to load a memory.`,
   }));
 }
 

@@ -490,6 +490,82 @@ export async function saveChunked(
   return success;
 }
 
+// ─── Account/usage snapshot for SessionStart header ────────────────────────
+//
+// Fetched fresh on every SessionStart — runs in parallel with the memory
+// recall, so adds ~0ms to wall-clock time. The whole point of "session start"
+// is showing the user a live snapshot: their captures should reflect the
+// memory they just saved, their recall counter should be current, their
+// tier should reflect the upgrade they did 30 seconds ago. Caching defeats
+// that. So we don't.
+
+export interface UsageBucket {
+  count: number;
+  limit: number;
+  unlimited: boolean;
+}
+
+export interface AccountSnapshot {
+  email: string | null;
+  tier: string;             // 'free' | 'pro' | 'teams'
+  total_memories: number;
+  recalls: UsageBucket;
+  workflows: UsageBucket;
+  captures: UsageBucket;
+  cycle_end: string | null; // ISO-ish date for the "resets May 31" hint
+}
+
+/**
+ * Fetch tier + usage for the current user. Always live. Returns null on
+ * any failure — the SessionStart hook is fire-and-forget; if the snapshot
+ * doesn't load, the header just omits the tier/usage lines.
+ *
+ * Three endpoints, three concerns, fetched in parallel:
+ *   /api/v1/auth/me            — email, tier (also returned by /usage)
+ *   /api/v1/subscriptions/usage — buckets (recalls/workflows/captures), cycle
+ *   /api/v1/stats              — total memories
+ */
+export async function getAccountSnapshot(apiKey: string): Promise<AccountSnapshot | null> {
+  try {
+    const [usage, me, stats] = await Promise.all([
+      apiGet(apiKey, '/api/v1/subscriptions/usage', 4000),
+      apiGet(apiKey, '/api/v1/auth/me', 4000),
+      apiGet(apiKey, '/api/v1/stats', 4000).catch(() => null),
+    ]);
+    if (!usage || !me) return null;
+
+    const u = usage as Record<string, unknown>;
+    const m = me as Record<string, unknown>;
+    const s = (stats ?? {}) as Record<string, unknown>;
+
+    // /usage wraps buckets under a `usage` key. Read from there, with a
+    // top-level fallback in case the API shape ever changes.
+    const buckets = (u.usage ?? u) as Record<string, unknown>;
+
+    return {
+      email: (m.email as string) ?? null,
+      tier: (u.tier as string) ?? 'free',
+      total_memories: Number(s.total_memories ?? 0),
+      recalls: usageBucket(buckets.recalls),
+      workflows: usageBucket(buckets.workflows),
+      captures: usageBucket(buckets.captures),
+      cycle_end: (u.billing_cycle_end as string) ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function usageBucket(raw: unknown): UsageBucket {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const limit = Number(r.limit ?? 0);
+  return {
+    count: Number(r.count ?? 0),
+    limit,
+    unlimited: Boolean(r.unlimited) || limit === -1,
+  };
+}
+
 // ─── Version check (update-notifier pattern) ────────────────────────────────
 
 const VERSION_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // once per day
