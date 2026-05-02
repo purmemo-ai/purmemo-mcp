@@ -40,6 +40,37 @@ const API_URL    = process.env.PURMEMO_API_URL || 'https://api.purmemo.ai';
 const APP_URL    = process.env.PURMEMO_APP_URL || 'https://app.purmemo.ai';
 const tokenStore = new TokenStore();
 
+// Cache the User-Agent so we compute it once per process. The MCP server
+// computes the same shape from server.ts; this keeps setup-flow pings
+// (status/init/add/--update) reporting the same telemetry as MCP-server-spawned
+// calls. Lazy-initialized because readInstalledVersion() reads package.json.
+let _userAgentCache: string | null = null;
+function purmemoUserAgent(): string {
+  if (_userAgentCache) return _userAgentCache;
+  let version = 'unknown';
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    version = pkg.version || 'unknown';
+  } catch { /* keep default */ }
+
+  let install: string = 'unknown';
+  try {
+    const packageDir = path.resolve(__dirname, '..');
+    let globalRoot: string | null = null;
+    try {
+      globalRoot = execSync('npm root -g', { encoding: 'utf8', timeout: 1000 }).trim() || null;
+    } catch { /* best-effort */ }
+    install = detectInstallMethod(packageDir, globalRoot);
+  } catch { /* keep default */ }
+
+  // Setup commands run interactively in a terminal, so platform is "cli".
+  // (server.ts overrides to claude / claude-code / etc. based on env vars.)
+  const platform = 'cli';
+
+  _userAgentCache = `purmemo-mcp/${version} (install=${install}; platform=${platform})`;
+  return _userAgentCache;
+}
+
 const HOOKS_DIR     = path.join(os.homedir(), '.claude', 'hooks');
 const COMMANDS_DIR  = path.join(os.homedir(), '.claude', 'commands');
 const SETTINGS_FILE = path.join(os.homedir(), '.claude', 'settings.json');
@@ -306,7 +337,10 @@ async function runSetup(forceNewProfile = false) {
       let info = await tokenStore.getUserInfo();
       try {
         const meRes = await fetch(`${API_URL}/api/v1/auth/me`, {
-          headers: { Authorization: `Bearer ${existing.access_token}` },
+          headers: {
+            Authorization: `Bearer ${existing.access_token}`,
+            'User-Agent': purmemoUserAgent(),
+          },
         });
         if (meRes.ok) {
           const me = await meRes.json() as { email?: string; tier?: string };
@@ -416,7 +450,10 @@ async function runSetup(forceNewProfile = false) {
   let sessionId: string;
   let pairingCode: string;
   try {
-    const res = await fetch(`${API_URL}/api/v1/auth/cli/request`, { method: 'POST' });
+    const res = await fetch(`${API_URL}/api/v1/auth/cli/request`, {
+      method: 'POST',
+      headers: { 'User-Agent': purmemoUserAgent() },
+    });
     if (!res.ok) throw new Error(`Server returned ${res.status}`);
     const data = await res.json();
     sessionId = data.session_id;
@@ -450,7 +487,9 @@ async function runSetup(forceNewProfile = false) {
     await sleep(POLL_MS);
     let pollData;
     try {
-      const res = await fetch(`${API_URL}/api/v1/auth/cli/poll/${sessionId}`);
+      const res = await fetch(`${API_URL}/api/v1/auth/cli/poll/${sessionId}`, {
+        headers: { 'User-Agent': purmemoUserAgent() },
+      });
       if (!res.ok) continue;
       pollData = await res.json();
     } catch { continue; }
@@ -1268,7 +1307,10 @@ async function testApiKey(apiKey) {
   const spinner = ora('Testing connection…').start();
   try {
     const res = await fetch(`${API_URL}/api/v1/auth/me`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'User-Agent': purmemoUserAgent(),
+      },
     });
     spinner.stop();
     if (res.ok) {
@@ -1288,7 +1330,10 @@ async function testApiKey(apiKey) {
 async function verifyApiKey(apiKey) {
   try {
     const res = await fetch(`${API_URL}/api/v1/auth/me`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'User-Agent': purmemoUserAgent(),
+      },
     });
     if (!res.ok) return null;
     return await res.json();
