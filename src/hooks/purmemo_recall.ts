@@ -108,7 +108,29 @@ export function renderSessionHeader(snap: AccountSnapshot): string {
   const tier = tierDisplayName(snap.tier);
   const email = snap.email ?? 'unknown';
   const totalMem = formatCount(snap.total_memories);
-  const line1 = `pūrmemo v${HOOKS_VERSION} · ${email} · ${tier} · ${totalMem} memories`;
+
+  // "✨ updated" badge on the first session after an upgrade. Compare the
+  // currently-running HOOKS_VERSION against the version we showed the user
+  // last time, stored in state. If they differ, this is the first session
+  // on a new version → show the badge and persist the new version so the
+  // next session drops it. Skips dev/unstamped builds and skips fresh
+  // installs (no last_seen_version yet — those are first-runs, not updates).
+  let updatedBadge = '';
+  if (!HOOKS_VERSION.startsWith('__')) {
+    try {
+      const state = readState();
+      const lastSeen = state['last_seen_version'] as string | undefined;
+      if (lastSeen && lastSeen !== HOOKS_VERSION) {
+        updatedBadge = ' ✨ updated';
+      }
+      if (lastSeen !== HOOKS_VERSION) {
+        state['last_seen_version'] = HOOKS_VERSION;
+        writeState(state);
+      }
+    } catch { /* non-fatal — header just omits the badge */ }
+  }
+
+  const line1 = `pūrmemo v${HOOKS_VERSION}${updatedBadge} · ${email} · ${tier} · ${totalMem} memories`;
 
   // Free user with a hit cap → upsell line replaces usage.
   if (snap.tier === 'free') {
