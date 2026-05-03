@@ -342,23 +342,19 @@ async function main(): Promise<void> {
   //
   // Gemini CLI renders `systemMessage` TWICE for a single SessionStart hook
   // result (verified in their source — packages/cli/src/ui/AppContainer.tsx
-  // lines 499-508 add an unlabeled INFO item after fireSessionStartEvent,
-  // AND packages/core/src/hooks/hookEventHandler.ts lines 463-468 emit a
-  // per-hook HookSystemMessage event that AppContainer's subscriber adds as
-  // a SECOND INFO item with the script path as `source` — i.e. the
-  // "[node /Users/.../purmemo_recall.js]" label). The `suppressOutput: true`
-  // flag short-circuits the aggregated unlabeled render (line 490 guards on
-  // `!suppressOutput`) but keeps the per-hook labeled render. Net result on
-  // Gemini: one block instead of two. Only acceptable trade-off until the
-  // upstream double-render is fixed.
+  // adds an unlabeled INFO item directly after fireSessionStartEvent, AND
+  // its HookSystemMessage subscriber adds a SECOND INFO item with the script
+  // path as `source` — the "[node /Users/.../purmemo_recall.js]" label).
+  // Both renders check only `result.systemMessage`; neither honors
+  // `suppressOutput`, so we cannot reduce to one block from our side.
+  // Tracked upstream — for now we omit `additionalContext` on Gemini to at
+  // least avoid making the duplicate worse, and accept the cosmetic issue.
   const visibleMessage = `${updateNotice}${headerBlock}${banner}\n\nType a number to load a memory.`;
   const payload: Record<string, unknown> = {
     hookSpecificOutput: { hookEventName: platformEvent('SessionStart', platform) },
     systemMessage: visibleMessage,
   };
-  if (platform === 'gemini') {
-    payload.suppressOutput = true;
-  } else {
+  if (platform !== 'gemini') {
     (payload.hookSpecificOutput as Record<string, unknown>).additionalContext = contextLines.join('\n');
   }
   process.stdout.write(JSON.stringify(payload));
