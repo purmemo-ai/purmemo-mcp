@@ -319,43 +319,54 @@ const TOOLS = [
       'openai/widgetAccessible': true,
       'openai/widgetDomain': 'save.widgets.purmemo.ai'
     },
-    description: `Save complete conversations as living documents. REQUIRED: Send COMPLETE conversation in 'conversationContent' parameter (minimum 100 chars, should be thousands). Include EVERY message verbatim - NO summaries or partial content.
+    description: `Save complete conversations as memory. REQUIRED: Send COMPLETE conversation in 'conversationContent' parameter (minimum 100 chars, should be thousands). Include EVERY message verbatim - NO summaries or partial content.
 
-    Intelligently tracks context, extracts project details, and maintains a single memory per conversation topic.
+    Intelligently tracks context, extracts project details, and routes to a single memory per conversation topic.
 
-    LIVING DOCUMENT + INTELLIGENT PROJECT TRACKING:
-    - Each conversation becomes a living document that grows over time
-    - Automatically extracts project context (name, component, feature being discussed)
+    HOW SAVES TARGET MEMORIES:
+    - conversationId is auto-generated from title slug (e.g., "MCP Tools" → "mcp-tools")
+    - Same title (or explicit conversationId) → targets the existing memory
+    - The 'mode' parameter controls what happens to that existing memory:
+      • mode='replace' (default): overwrites the existing content with what you send
+      • mode='append': concatenates new content below existing with a timestamped separator
+        (\\n\\n--- UPDATE <ISO8601> ---\\n\\n) — preserves all prior history in the live row
+    - The /save skill sets mode='append' automatically for living-document use
+    - For one-shot snapshots, ad-hoc captures, or explicit overwrite: pass mode='replace'
+
+    PRIOR CONTENT IS NEVER LOST:
+    - Even with mode='replace', prior content is snapshotted to memory_events audit log on every update
+    - Recovery from overwrites requires a one-off script (out-of-band)
+    - Use mode='append' if you want history to remain visible inline in the live memory
+
+    INTELLIGENT EXTRACTION (independent of mode):
+    - Auto-extracts project context (name, component, feature being discussed)
     - Detects work iteration and status (planning/in_progress/completed/blocked)
-    - Generates smart titles like "Purmemo - Timeline View - Implementation" (no more timestamp titles!)
-    - Tracks technologies, tools used, and identifies relationships/dependencies
-    - Works like Chrome extension: intelligent memory that grows with each save
-
-    How memory updating works:
-    - Conversation ID auto-generated from title (e.g., "MCP Tools" → "mcp-tools")
-    - Same title → UPDATES existing memory (not create duplicate)
-    - "Save progress" → Updates most recent memory for current project context
-    - Explicit conversationId → Always updates that specific memory
-    - Example: Saving "Project X Planning" three times = ONE memory updated three times
-    - To force new memory: Change title or use different conversationId
+    - Generates smart titles like "Purmemo - Timeline View - Implementation"
+    - Tracks technologies, tools used, identifies relationships/dependencies
 
     SERVER AUTO-CHUNKING:
     - Large conversations (>15K chars) automatically split into linked chunks
     - Small conversations (<15K chars) saved directly as single memory
-    - You always send complete content - server handles chunking intelligently
-    - All chunks linked together for seamless retrieval
+    - You always send complete content — server handles chunking
+    - APPEND + CHUNKING: append mode works only for content <15K chars. Saves >15K
+      with mode='append' are rejected with a clear error — appending to chunked
+      storage would double each chunk's content on re-save. For long-running living
+      docs, send only the new delta since the last save (keep it <15K) or use
+      mode='replace' for full re-saves.
+    - KNOWN CAVEAT: a doc that is saved small (single memory) and later grows past 15K
+      transitions to chunked storage at a new conversation_id space — the original
+      single memory becomes orphaned. Tracked under ADR-038 (uniform namespace).
 
     EXAMPLES:
-    User: "Save progress" (working on Purmemo timeline feature)
-    → System auto-generates: "Purmemo - Timeline View - Implementation"
-    → Updates existing memory if this title was used before
+    User: "Save progress" via /save skill
+    → /save sets mode='append'; new content is appended below prior content
 
-    User: "Save this conversation" (discussing React hooks implementation)
-    → System auto-generates: "Frontend - React Hooks - Implementation"
+    User: "Save this snapshot" (one-shot capture)
+    → mode='replace' default; current content overwrites any existing memory at this title
 
-    User: "Save as conversation react-hooks-guide"
-    → You call save_conversation with conversationId="react-hooks-guide"
-    → Creates or updates memory with this specific ID
+    User: "Save as conversation react-hooks-guide" with explicit append
+    → save_conversation(conversationId="react-hooks-guide", mode="append")
+    → Appends to existing memory at that ID (or creates if new)
 
     WHAT TO INCLUDE (COMPLETE CONVERSATION REQUIRED):
     - EVERY user message (verbatim, not paraphrased)
@@ -415,6 +426,12 @@ const TOOLS = [
           enum: ['low', 'medium', 'high'],
           description: 'Priority level for this memory',
           default: 'medium'
+        },
+        mode: {
+          type: 'string',
+          enum: ['replace', 'append'],
+          description: 'How to handle a save that targets an existing memory (same title or conversationId). "replace" (default) overwrites the existing content with what you send. "append" concatenates new content below the existing content with a timestamped separator (\\n\\n--- UPDATE <ISO8601> ---\\n\\n). Use "append" for living documents you genuinely want to grow over time; use "replace" for one-shot snapshots and ad-hoc captures. The /save skill defaults to "append" automatically — you only need to pass this for explicit overrides.',
+          default: 'replace'
         }
       },
       required: ['conversationContent']
@@ -1492,13 +1509,13 @@ const server = new Server(
     instructions: `Purmemo is a cross-platform AI conversation memory system. Use these tools to save, search, and discover conversations across ChatGPT, Claude, Gemini, and other platforms.
 
 CORE WORKFLOW:
-1. save_conversation — Save COMPLETE conversations as living documents. Same title updates existing memory. Include every message verbatim (minimum 500 chars, expect thousands). Server auto-chunks content >15K chars.
+1. save_conversation — Save COMPLETE conversations as memory. Same title (or conversationId) targets the existing memory. The 'mode' parameter controls update behavior: mode='replace' (default) overwrites; mode='append' concatenates with a timestamped separator. The /save skill sets mode='append' automatically. Include every message verbatim (minimum 500 chars, expect thousands). Server auto-chunks content >15K chars and forwards mode to each chunk.
 2. recall_memories — Search memories with semantic ranking. Use Phase 2 filters (entity, has_observations, initiative, intent) for precision. Default hybrid search covers most cases.
 3. get_memory_details — Retrieve full memory content including all linked chunks for multi-part conversations.
 4. discover_related_conversations — Find related conversations across ALL AI platforms using semantic clustering.
 
 KEY PATTERNS:
-- Living Documents: Same title = updates existing memory (not duplicates). Use conversationId for explicit control.
+- Update semantics: Same title = targets the existing memory. mode='replace' overwrites; mode='append' adds a timestamped section below prior content. Pick based on whether you want history visible inline.
 - Cross-Platform: Memories span ChatGPT, Claude, Gemini, Cursor — discover_related_conversations finds connections across all platforms.
 - Intelligent Extraction: save_conversation auto-extracts project context, technologies, status, and generates smart titles.
 - Quality Filtering: Use has_observations=true to find substantial technical discussions; entity="name" for specific topics.

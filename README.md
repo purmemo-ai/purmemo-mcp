@@ -331,19 +331,24 @@ The `/context` command is especially useful at the start of a session: it calls 
 
 ## Living Document Pattern
 
-Same title = update, not duplicate. Build on memory over time:
+Same title (or `conversationId`) targets the same memory. Update behavior is controlled by the `mode` parameter:
+
+- **`mode: "append"`** — concatenates new content below existing with a timestamped separator (`\n\n--- UPDATE <ISO8601> ---\n\n`). Prior content stays visible inline. The `/save` slash command uses this automatically — ideal for genuine living documents.
+- **`mode: "replace"`** (default for direct tool calls) — overwrites existing content. Prior content is snapshotted to the `memory_events` audit log but not surfaced by recall. Use for one-shot captures and ad-hoc snapshots.
 
 ```
-You: "Save this as auth-refactor"
-Claude: ✅ Saved — "auth-refactor" (new)
+You: "/save"  (Claude calls save_conversation with mode='append')
+Claude: ✅ Saved — "auth-refactor" (new, mode=append)
 
-[... continue working across multiple sessions ...]
+[... continue working ...]
 
-You: "Save as auth-refactor"
-Claude: ✅ Updated — "auth-refactor" (3 updates, not 3 copies)
+You: "/save"  (more progress, same title)
+Claude: ✅ Appended — "auth-refactor" (mode=append; prior content + new content with timestamp separator)
 ```
 
-Long conversations? Auto-chunked at 100K+ characters and reassembled on recall.
+Long conversations? Auto-chunked at 15K+ characters and reassembled on recall. **Append mode works only for content <15K chars.** Saves >15K with `mode='append'` are rejected — appending to chunked storage would double each chunk's content on re-save. For long-running living docs, send only the new delta since the last save (keep it <15K) or use `mode='replace'` for a full re-save.
+
+> **Known caveat:** a doc that starts small (single-memory) and later grows past 15K characters transitions to chunked storage at a new `conversation_id` namespace. The original single memory becomes orphaned. To avoid the orphan, pass an explicit `conversationId` if you anticipate growth. Full namespace unification is tracked under ADR-038.
 
 ---
 

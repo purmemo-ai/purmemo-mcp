@@ -33,7 +33,7 @@
     "status": "node dist/setup.js status",
     "logout": "node dist/setup.js logout",
     "hooks": "node dist/setup.js hooks",
-    "test": "node --test tests/*.test.js",
+    "test": "node --experimental-test-module-mocks --test tests/*.test.js",
     "build:mcpb": "node scripts/build-mcpb.js",
     "prepublishOnly": "npm run build",
     "postinstall": "node -e \"console.log('\\\\n🧠 pūrmemo MCP ready! Run: npx purmemo-mcp init\\\\n')\""
