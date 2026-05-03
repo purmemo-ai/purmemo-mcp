@@ -844,6 +844,7 @@ export async function handleSnapshotSources(args) {
     const data = await makeApiCall('/api/v1/snapshots/sources', {
       method: 'POST',
       body: JSON.stringify({ topic }),
+      timeoutMs: 90000,
     });
 
     structuredLog.info(`${toolName}: complete`, {
@@ -2154,7 +2155,7 @@ export async function handleRecallPublic(args) {
 
     const platformEmoji = {
       chatgpt: '🤖', claude: '🟣', 'claude-code': '🟣', gemini: '💎',
-      cursor: '⚡', figma: '🎨', 'purmemo-web': '🧠'
+      cursor: '⚡', codex: '🧬', figma: '🎨', 'purmemo-web': '🧠'
     };
 
     for (const mem of data.memories) {
@@ -2215,7 +2216,7 @@ export async function handleGetPublicMemory(args) {
 
     const platformEmoji = {
       chatgpt: '🤖', claude: '🟣', 'claude-code': '🟣', gemini: '💎',
-      cursor: '⚡', figma: '🎨', 'purmemo-web': '🧠'
+      cursor: '⚡', codex: '🧬', figma: '🎨', 'purmemo-web': '🧠'
     };
 
     const pEmoji = platformEmoji[data.platform] || '📝';
@@ -2235,7 +2236,8 @@ export async function handleGetPublicMemory(args) {
     if (data.observations && data.observations.length > 0) {
       output += `**Key Insights:**\n`;
       for (const obs of data.observations.slice(0, 10)) {
-        output += `• ${obs}\n`;
+        const text = typeof obs === 'object' ? (obs.text || obs.fact || obs.observation || JSON.stringify(obs)) : obs;
+        output += `• ${text}\n`;
       }
       output += `\n`;
     }

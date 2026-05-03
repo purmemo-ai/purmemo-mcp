@@ -224,7 +224,7 @@ structuredLog.info('API configuration loaded', {
 });
 
 // Platform detection: user specifies via MCP_PLATFORM env var
-// Supported: 'claude', 'claude-code', 'cursor', 'chatgpt', 'windsurf', 'zed'
+// Supported: 'claude', 'claude-code', 'cursor', 'chatgpt', 'codex', 'gemini', 'windsurf', 'zed'
 // MCP is a universal protocol - same server works across all platforms
 // Auto-detect Claude Code vs Claude Desktop
 const detectPlatform = () => {
