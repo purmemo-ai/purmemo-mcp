@@ -1152,9 +1152,15 @@ function installCodexSkill() {
 // Codex shares Claude's hook event names AND the hookSpecificOutput.additionalContext
 // nesting, so our existing src/hooks/ scripts work unchanged. Detection routes
 // Codex via MCP_PLATFORM=codex env var (set in wireCodex) or transcript_path.
+//
+// IMPORTANT: Codex gates hooks behind `[features] codex_hooks = true` in
+// config.toml — without that flag set, hooks.json is silently ignored.
+// installCodexHooks() ensures it's enabled (idempotent).
 function installCodexHooks() {
   const codexDir = path.join(os.homedir(), '.codex');
   if (!fs.existsSync(codexDir)) return;
+
+  enableCodexHooksFeatureFlag();
 
   try {
     const hooksDir = path.join(codexDir, 'hooks');
@@ -1242,6 +1248,34 @@ function codexHooksExist(): boolean {
 
 function codexHooksOutdated(): boolean {
   return libVersionOutdated(path.join(os.homedir(), '.codex', 'hooks', 'purmemo_lib.js'));
+}
+
+// Codex hooks are gated behind `[features] codex_hooks = true` in config.toml.
+// Without that flag, hooks.json is silently ignored and the user gets a Codex
+// session with no purmemo header / context injection. Toggle is idempotent —
+// no-op when already enabled, adds the section/line otherwise.
+function enableCodexHooksFeatureFlag(): void {
+  const configPath = path.join(os.homedir(), '.codex', 'config.toml');
+  if (!fs.existsSync(configPath)) return;
+
+  try {
+    const content = fs.readFileSync(configPath, 'utf8');
+
+    // Already enabled? Match `codex_hooks = true` (allow whitespace variations).
+    if (/^\s*codex_hooks\s*=\s*true\s*$/m.test(content)) return;
+
+    // Already has [features] section but flag missing → insert under it.
+    let updated: string;
+    if (/^\[features\]/m.test(content)) {
+      updated = content.replace(/(^\[features\]\n)/m, `$1codex_hooks = true\n`);
+    } else {
+      updated = content.trimEnd() + `\n\n[features]\ncodex_hooks = true\n`;
+    }
+
+    const tmp = configPath + '.tmp';
+    fs.writeFileSync(tmp, updated, 'utf8');
+    fs.renameSync(tmp, configPath);
+  } catch { /* non-fatal — installCodexHooks still writes the files */ }
 }
 
 function printSuccess() {
