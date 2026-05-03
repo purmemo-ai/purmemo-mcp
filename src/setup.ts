@@ -265,6 +265,19 @@ async function reconcileInstallation(): Promise<void> {
     }
   } catch { /* non-fatal — show nothing rather than partial state */ }
 
+  // --- 2b. Refresh Gemini CLI extension if outdated ---------------------------
+  // Same opt-in rule as Claude: only refresh if the user previously linked the
+  // Gemini extension. installGeminiExtension() is idempotent and re-stamps the
+  // package version into purmemo_lib.js, so the next Gemini session sees the
+  // new HOOKS_VERSION (and thus the SessionStart header, ✨ updated badge, and
+  // any other code that lives in src/hooks/).
+  try {
+    if (geminiExtensionExists() && geminiExtensionOutdated()) {
+      installGeminiExtension();
+      summary.push('Refreshed Gemini CLI extension');
+    }
+  } catch { /* non-fatal */ }
+
   // --- 3. Scrub PURMEMO_API_KEY from shell configs ----------------------------
   try {
     const edits = scrubShellConfigKey();
@@ -592,16 +605,21 @@ function hooksAlreadyInstalled() {
 }
 
 function hooksOutdated(): boolean {
+  return libVersionOutdated(path.join(HOOKS_DIR, 'purmemo_lib.js'));
+}
+
+// Read HOOKS_VERSION stamped into a copy of purmemo_lib.js and compare with
+// this package's version. Used to decide whether a hook install location
+// (Claude or Gemini) needs a refresh during `--update` reconciliation.
+function libVersionOutdated(libPath: string): boolean {
   try {
-    const libPath = path.join(HOOKS_DIR, 'purmemo_lib.js');
     if (!fs.existsSync(libPath)) return false;
     const content = fs.readFileSync(libPath, 'utf8');
     const match = content.match(/HOOKS_VERSION\s*=\s*["']([^"']+)["']/);
-    if (!match) return true; // can't determine version → treat as outdated
+    if (!match) return true;
     const installed = match[1];
-    if (installed.startsWith('__')) return true; // unstamped dev version
+    if (installed.startsWith('__')) return true;
     const pkgVersion = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
-    // Compare semver: if installed < package version, outdated
     const i = installed.split('.').map(Number);
     const p = pkgVersion.split('.').map(Number);
     for (let n = 0; n < 3; n++) {
@@ -610,6 +628,18 @@ function hooksOutdated(): boolean {
     }
     return false;
   } catch { return false; }
+}
+
+// True if the Gemini extension was previously installed on this machine.
+// Mirrors the Claude check on line 262 (HOOK_SCRIPTS exist in HOOKS_DIR).
+// We only refresh extensions the user already opted into — never auto-install.
+function geminiExtensionExists(): boolean {
+  const scriptsDir = path.join(os.homedir(), '.purmemo', 'gemini-extension', 'scripts');
+  return fs.existsSync(path.join(scriptsDir, 'purmemo_lib.js'));
+}
+
+function geminiExtensionOutdated(): boolean {
+  return libVersionOutdated(path.join(os.homedir(), '.purmemo', 'gemini-extension', 'scripts', 'purmemo_lib.js'));
 }
 
 function hasOldHooks() {
