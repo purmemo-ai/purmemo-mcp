@@ -52,6 +52,11 @@ export async function startRemoteServer(ctx) {
   // Alias for code that reads resolvedApiKey directly
   let resolvedApiKey = getResolvedApiKey();
 
+  // Structured User-Agent for telemetry (matches CLI format, see auth.ts recordClientPing).
+  // install=remote because this process runs as the Render-hosted remote MCP server;
+  // platform=mcp-server because it brokers between Claude.ai (and other web MCP clients) and the API.
+  const USER_AGENT = `purmemo-mcp/${CLIENT_VERSION} (install=remote; platform=mcp-server)`;
+
   // ========================================================================
   // REMOTE MODE — Express + Streamable HTTP + SSE (replaces Python server)
   // ========================================================================
@@ -186,7 +191,7 @@ export async function startRemoteServer(ctx) {
     const token = auth.split(' ')[1];
     try {
       const resp = await fetch(`${API_URL}/api/v1/auth/me`, {
-        headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': `purmemo-mcp/${CLIENT_VERSION}` },
+        headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': USER_AGENT },
         signal: AbortSignal.timeout(10000)
       });
       if (resp.ok) return token;
@@ -303,7 +308,7 @@ export async function startRemoteServer(ctx) {
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
-          'User-Agent': `purmemo-mcp/${CLIENT_VERSION}`,
+          'User-Agent': USER_AGENT,
           'X-MCP-Version': CLIENT_VERSION
         },
         body: JSON.stringify({ tool: toolName, arguments: toolArgs }),
@@ -332,7 +337,7 @@ export async function startRemoteServer(ctx) {
                   headers: {
                     'Authorization': `Bearer ${newToken}`,
                     'Content-Type': 'application/json',
-                    'User-Agent': `purmemo-mcp/${CLIENT_VERSION}`
+                    'User-Agent': USER_AGENT
                   },
                   body: JSON.stringify({ tool: toolName, arguments: toolArgs }),
                   signal: AbortSignal.timeout(30000)
@@ -498,7 +503,7 @@ export async function startRemoteServer(ctx) {
 
         // Memory resources — proxy to backend
         try {
-          const authHeaders = { 'Authorization': `Bearer ${apiKey}`, 'User-Agent': `purmemo-mcp/${CLIENT_VERSION}` };
+          const authHeaders = { 'Authorization': `Bearer ${apiKey}`, 'User-Agent': USER_AGENT };
           let text = '', mimeType = 'text/plain';
 
           if (uri === 'memory://me') {
@@ -939,7 +944,7 @@ export async function startRemoteServer(ctx) {
         const apiKey = Buffer.from(session, 'base64').toString('utf8');
         // Validate against backend
         const meResp = await fetch(`${API_URL}/api/v1/auth/me`, {
-          headers: { 'Authorization': `Bearer ${apiKey}`, 'User-Agent': `purmemo-mcp/${CLIENT_VERSION}` },
+          headers: { 'Authorization': `Bearer ${apiKey}`, 'User-Agent': USER_AGENT },
           signal: AbortSignal.timeout(10000)
         });
         if (meResp.ok) {
@@ -991,7 +996,7 @@ export async function startRemoteServer(ctx) {
     const headers = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${jwtToken}`,
-      'User-Agent': `purmemo-mcp/${CLIENT_VERSION}`,
+      'User-Agent': USER_AGENT,
     };
 
     // Check for existing active claude.ai key to avoid accumulation on reconnect
@@ -1043,7 +1048,7 @@ export async function startRemoteServer(ctx) {
     try {
       const authResp = await fetch(`${API_URL}/api/v1/auth/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'User-Agent': `purmemo-mcp/${CLIENT_VERSION}` },
+        headers: { 'Content-Type': 'application/json', 'User-Agent': USER_AGENT },
         body: JSON.stringify({ email, password }),
         signal: AbortSignal.timeout(10000)
       });
@@ -1077,7 +1082,7 @@ export async function startRemoteServer(ctx) {
     try {
       const regResp = await fetch(`${API_URL}/api/v1/auth/register`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'User-Agent': `purmemo-mcp/${CLIENT_VERSION}` },
+        headers: { 'Content-Type': 'application/json', 'User-Agent': USER_AGENT },
         body: JSON.stringify({ email, password }),
         signal: AbortSignal.timeout(10000)
       });
@@ -1116,7 +1121,7 @@ export async function startRemoteServer(ctx) {
       const { email } = req.body;
       const resp = await fetch(`${API_URL}/api/v1/auth/check-email`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'User-Agent': `purmemo-mcp/${CLIENT_VERSION}` },
+        headers: { 'Content-Type': 'application/json', 'User-Agent': USER_AGENT },
         body: JSON.stringify({ email }),
         signal: AbortSignal.timeout(10000)
       });
