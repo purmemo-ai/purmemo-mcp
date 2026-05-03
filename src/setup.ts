@@ -278,6 +278,17 @@ async function reconcileInstallation(): Promise<void> {
     }
   } catch { /* non-fatal */ }
 
+  // --- 2c. Refresh Codex hooks if outdated ------------------------------------
+  // Same opt-in rule. Codex shares Claude's hook event names + JSON schema,
+  // so the same src/hooks/ scripts work — installCodexHooks() just copies
+  // them to ~/.codex/hooks/ and re-stamps the version.
+  try {
+    if (codexHooksExist() && codexHooksOutdated()) {
+      installCodexHooks();
+      summary.push('Refreshed Codex hooks');
+    }
+  } catch { /* non-fatal */ }
+
   // --- 3. Scrub PURMEMO_API_KEY from shell configs ----------------------------
   try {
     const edits = scrubShellConfigKey();
@@ -953,6 +964,7 @@ async function wireMcpServer() {
   // Codex (OpenAI)
   wireCodex();
   installCodexSkill();
+  installCodexHooks();
 
   // Gemini CLI (Google)
   wireGemini();
@@ -1132,6 +1144,104 @@ function installCodexSkill() {
   } catch (err) {
     console.log(chalk.gray(`Could not install Codex skill: ${(err as Error).message}`));
   }
+}
+
+// Codex hook layout (per https://developers.openai.com/codex/hooks):
+//   ~/.codex/hooks.json          — registers SessionStart hooks
+//   ~/.codex/hooks/purmemo_*.js  — hook scripts (mirrors Claude layout)
+// Codex shares Claude's hook event names AND the hookSpecificOutput.additionalContext
+// nesting, so our existing src/hooks/ scripts work unchanged. Detection routes
+// Codex via MCP_PLATFORM=codex env var (set in wireCodex) or transcript_path.
+function installCodexHooks() {
+  const codexDir = path.join(os.homedir(), '.codex');
+  if (!fs.existsSync(codexDir)) return;
+
+  try {
+    const hooksDir = path.join(codexDir, 'hooks');
+    fs.mkdirSync(hooksDir, { recursive: true });
+
+    // Write ESM package.json so hooks can use import/export
+    const hooksPkg = path.join(hooksDir, 'package.json');
+    if (!fs.existsSync(hooksPkg)) {
+      fs.writeFileSync(hooksPkg, '{"type":"module"}\n', 'utf8');
+    }
+
+    // Copy compiled hook scripts from dist/hooks/ → ~/.codex/hooks/.
+    // Stamp __HOOKS_VERSION__ in purmemo_lib.js with the actual package version
+    // so libVersionOutdated() can reconcile this surface during --update.
+    const srcHooksDir = path.join(__dirname, 'hooks');
+    const pkgVersion = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
+    for (const file of HOOK_SCRIPTS) {
+      const src = path.join(srcHooksDir, file);
+      if (!fs.existsSync(src)) continue;
+      const dest = path.join(hooksDir, file);
+      if (file === 'purmemo_lib.js') {
+        let content = fs.readFileSync(src, 'utf8');
+        content = content.replace(/__HOOKS_VERSION__/g, pkgVersion);
+        fs.writeFileSync(dest, content, 'utf8');
+      } else {
+        fs.copyFileSync(src, dest);
+      }
+      if (process.platform !== 'win32') fs.chmodSync(dest, 0o755);
+    }
+
+    // Write/merge hooks.json. We register only SessionStart (purmemo_recall)
+    // and UserPromptSubmit (purmemo_first_message — handles the "type a number
+    // to load" flow). Skipping PostToolUse / Stop deliberately — capture is
+    // covered by PurmemoAMP's session intelligence pipeline; doubling up here
+    // would create duplicate cloud memories like we hit on Gemini in Apr 2026.
+    const hooksJsonPath = path.join(codexDir, 'hooks.json');
+    const recallCmd = `node ${path.join(hooksDir, 'purmemo_recall.js')}`;
+    const firstMsgCmd = `node ${path.join(hooksDir, 'purmemo_first_message.js')}`;
+    const desired = {
+      hooks: {
+        SessionStart: [{
+          matcher: 'startup|resume',
+          hooks: [{ type: 'command', command: recallCmd, statusMessage: 'Loading purmemo memory…' }],
+        }],
+        UserPromptSubmit: [{
+          matcher: '.*',
+          hooks: [{ type: 'command', command: firstMsgCmd }],
+        }],
+      },
+    };
+
+    // Merge with any existing hooks.json — only touch our own entries (matched
+    // by command path containing ~/.codex/hooks/purmemo_) so we never clobber
+    // the user's own hook registrations.
+    let existing: { hooks?: Record<string, unknown[]> } = { hooks: {} };
+    if (fs.existsSync(hooksJsonPath)) {
+      try { existing = JSON.parse(fs.readFileSync(hooksJsonPath, 'utf8')); } catch { /* malformed — overwrite */ }
+    }
+    const merged = { ...existing, hooks: { ...(existing.hooks || {}) } };
+    for (const [event, entries] of Object.entries(desired.hooks)) {
+      const others = ((merged.hooks as Record<string, unknown[]>)[event] || []).filter((entry) => {
+        const e = entry as { hooks?: Array<{ command?: string }> };
+        return !e.hooks?.some(h => h.command?.includes(`${hooksDir}${path.sep}purmemo_`));
+      });
+      (merged.hooks as Record<string, unknown[]>)[event] = [...others, ...entries];
+    }
+
+    const tmp = hooksJsonPath + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n', 'utf8');
+    fs.renameSync(tmp, hooksJsonPath);
+
+    console.log(chalk.green('✅ Codex hooks installed'));
+    console.log(chalk.gray(`   Hooks:  ~/.codex/hooks/purmemo_*.js`));
+    console.log(chalk.gray(`   Config: ~/.codex/hooks.json`));
+  } catch (err) {
+    console.log(chalk.gray(`Could not install Codex hooks: ${(err as Error).message}`));
+  }
+}
+
+// True if the Codex hook scripts were previously installed on this machine.
+// Mirrors geminiExtensionExists() — only refresh surfaces the user opted into.
+function codexHooksExist(): boolean {
+  return fs.existsSync(path.join(os.homedir(), '.codex', 'hooks', 'purmemo_lib.js'));
+}
+
+function codexHooksOutdated(): boolean {
+  return libVersionOutdated(path.join(os.homedir(), '.codex', 'hooks', 'purmemo_lib.js'));
 }
 
 function printSuccess() {

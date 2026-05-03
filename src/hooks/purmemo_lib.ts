@@ -52,7 +52,7 @@ const API_URL = process.env.PURMEMO_API_URL || 'https://api.purmemo.ai';
 
 // ─── Platform detection ─────────────────────────────────────────────────────
 
-export type Platform = 'claude' | 'gemini';
+export type Platform = 'claude' | 'gemini' | 'codex';
 
 // Events that ONLY Gemini CLI uses. SessionStart/SessionEnd are shared with
 // Claude Code, so they MUST NOT be here — matching them would mislabel every
@@ -87,6 +87,14 @@ export function detectPlatform(input?: HookInput): Platform {
     _detectedPlatform = 'gemini';
   } else if (process.env.MCP_PLATFORM === 'gemini') {
     _detectedPlatform = 'gemini';
+  } else if (input?.transcript_path?.startsWith(path.join(os.homedir(), '.codex') + path.sep)) {
+    // Codex shares Claude Code's hook event names (SessionStart, PreToolUse,
+    // PostToolUse, UserPromptSubmit, Stop) so we can't disambiguate via event
+    // name alone — fall back to transcript path or the env var we set in
+    // wireCodex (~/.codex/config.toml writes MCP_PLATFORM=codex).
+    _detectedPlatform = 'codex';
+  } else if (process.env.MCP_PLATFORM === 'codex') {
+    _detectedPlatform = 'codex';
   } else {
     _detectedPlatform = 'claude';
   }
@@ -109,6 +117,13 @@ export function platformEvent(internalName: string, platform: Platform): string 
 function getPaths(platform: Platform) {
   if (platform === 'gemini') {
     const dir = path.join(os.homedir(), '.gemini');
+    return {
+      stateFile: path.join(dir, 'purmemo_state.json'),
+      debugLog: path.join(dir, 'purmemo_debug.log'),
+    };
+  }
+  if (platform === 'codex') {
+    const dir = path.join(os.homedir(), '.codex');
     return {
       stateFile: path.join(dir, 'purmemo_state.json'),
       debugLog: path.join(dir, 'purmemo_debug.log'),
