@@ -196,26 +196,27 @@ Files to change:
 
 ## Automatic Conversation Saving
 
-When user says "save progress" or when significant milestones are reached, use the `/save` slash command which intelligently saves or updates conversations.
+When user says "save progress" or when significant milestones are reached, use the `/save` slash command which calls `save_conversation` with `mode: "append"`.
 
-**LIVING DOCUMENT INTELLIGENCE:**
-- The system AUTO-DETECTS whether this is a first save (CREATE) or update (UPDATE)
-- Same conversation topic = UPDATES existing memory (no duplicates)
-- Auto-generates conversation_id from title for consistency
-- Example: "Purmemo - Timeline View" saved 3 times = ONE memory updated 3 times
+**HOW SAVES TARGET MEMORIES (post-ADR-036):**
+- Same title (or explicit `conversationId`) → targets the existing memory
+- `mode: "append"` (the /save default): server concatenates new content below existing with a timestamped separator (`\n\n--- UPDATE <ISO8601> ---\n\n`). Prior content stays visible inline.
+- `mode: "replace"` (one-shot capture): overwrites existing content entirely. Prior content survives in the memory_events audit log but is not surfaced by recall.
+- /save always uses append. Pass `mode: "replace"` only when the user explicitly asks for a fresh snapshot.
 
 **YOUR RESPONSIBILITIES:**
 
 1. **Use consistent, descriptive titles** following the format:
    - `[Project] - [Component/Feature] - [Type]`
    - Examples: "Purmemo - MCP Integration - Implementation"
-   - Same title = automatic update of existing memory
+   - Same title = same memory; append continues the thread
 
-2. **Include COMPLETE conversation content**:
-   - ALL user messages verbatim (not summaries)
-   - ALL assistant responses completely
+2. **Include the new content verbatim, not a summary**:
+   - ALL new user messages exactly as written
+   - ALL new assistant responses completely
    - ALL code blocks with full syntax
-   - Minimum 500 chars expected (should be thousands)
+   - With append, you do NOT need to re-send already-saved content — only what's new since the last /save
+   - Minimum 500 chars expected for the new content
 
 3. **When to save**:
    - User explicitly asks "save progress" or "save this"
@@ -223,13 +224,15 @@ When user says "save progress" or when significant milestones are reached, use t
    - End of session with meaningful work accomplished
    - Do this proactively without waiting for explicit request
 
-4. **Use the /save slash command** - it handles all the intelligence for you
+4. **Use the /save slash command** — it sets `mode: "append"` automatically
 
 The tool automatically:
-- Detects existing conversations and updates them (no duplicates)
+- Routes to the existing memory at the same title/conversationId
+- Appends with timestamp separator (or replaces if explicit `mode: "replace"`)
 - Extracts project context, progress, relationships
 - Generates smart metadata and tags
-- Chunks large conversations if needed
+- Chunks large conversations (>15K chars) — but **append + chunking is rejected**: send a smaller delta (<15K) or use `mode='replace'`
+- KNOWN CAVEAT: a doc that is small (single-memory) and later grows past 15K transitions to chunked storage at a new conversation_id space. Original single memory becomes orphaned. PR 4 / ADR-038 will unify the namespace; until then, anticipate by passing explicit `conversationId` for docs that will likely grow large.
 
 ## Project Context
 
