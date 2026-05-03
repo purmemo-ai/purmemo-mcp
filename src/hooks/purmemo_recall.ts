@@ -338,17 +338,27 @@ async function main(): Promise<void> {
 
   // Platform-aware output. Claude Code treats `additionalContext` as silent
   // (model-only) and `systemMessage` as user-visible — so we send the rich
-  // handoff brief silently and the numbered list visibly. Gemini CLI renders
-  // BOTH visibly and labels `additionalContext` blocks with the subprocess
-  // path (e.g. "[node /Users/.../purmemo_recall.js]"), which produces a
-  // duplicated, noisy header. On Gemini we therefore omit `additionalContext`
-  // and rely on the visible `systemMessage` as the model's context too.
+  // handoff brief silently and the numbered list visibly.
+  //
+  // Gemini CLI renders `systemMessage` TWICE for a single SessionStart hook
+  // result (verified in their source — packages/cli/src/ui/AppContainer.tsx
+  // lines 499-508 add an unlabeled INFO item after fireSessionStartEvent,
+  // AND packages/core/src/hooks/hookEventHandler.ts lines 463-468 emit a
+  // per-hook HookSystemMessage event that AppContainer's subscriber adds as
+  // a SECOND INFO item with the script path as `source` — i.e. the
+  // "[node /Users/.../purmemo_recall.js]" label). The `suppressOutput: true`
+  // flag short-circuits the aggregated unlabeled render (line 490 guards on
+  // `!suppressOutput`) but keeps the per-hook labeled render. Net result on
+  // Gemini: one block instead of two. Only acceptable trade-off until the
+  // upstream double-render is fixed.
   const visibleMessage = `${updateNotice}${headerBlock}${banner}\n\nType a number to load a memory.`;
   const payload: Record<string, unknown> = {
     hookSpecificOutput: { hookEventName: platformEvent('SessionStart', platform) },
     systemMessage: visibleMessage,
   };
-  if (platform !== 'gemini') {
+  if (platform === 'gemini') {
+    payload.suppressOutput = true;
+  } else {
     (payload.hookSpecificOutput as Record<string, unknown>).additionalContext = contextLines.join('\n');
   }
   process.stdout.write(JSON.stringify(payload));
