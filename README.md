@@ -256,6 +256,17 @@ No re-explaining who you are. No repeating your stack. Just continue.
 | `discover_related_conversations` | Find related discussions across platforms |
 | `get_user_context` | Load your identity profile and recent work context |
 
+### Artifacts & Snapshots
+
+| Tool | Description |
+|------|-------------|
+| `commit` | Persist a commitment-shaped artifact (PRD, ADR, spec, OKR) — used by `/prd`, `/decide`, `/spec` |
+| `snapshot` | Generate a state-shaped artifact for a topic from your saved memories — used by `/snapshot` |
+| `snapshot_sources` | Fetch citation bundle + conflict detection for in-context synthesis (ADR-032 Amendment A) |
+| `save_snapshot` | Persist a synthesized snapshot as a draft |
+| `get_snapshot` | Read an existing canonical snapshot into context |
+| `accept_snapshot` | Promote a draft snapshot to canonical |
+
 ### Workflows
 
 | Tool | Description |

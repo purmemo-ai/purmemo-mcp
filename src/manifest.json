@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "purmemo-mcp",
   "display_name": "pūrmemo — AI Memory",
-  "version": "15.7.16",
+  "version": "15.7.17",
   "description": "Persistent AI memory + workflows for Claude. Save conversations, recall context, and run memory-powered workflows across every session.",
   "long_description": "pūrmemo gives Claude a memory that persists across sessions and structured workflows powered by your memory.\n\n**What it does:**\n- **Save** — Store conversations with explicit replace/append semantics. The `mode` parameter on `save_conversation` controls update behavior: `mode=\"append\"` concatenates new content with a timestamped separator (true living document); `mode=\"replace\"` overwrites (one-shot snapshot).\n- **Recall** — Search and surface relevant memories when you need them\n- **Workflows** — Run 15+ memory-powered workflows (PRD, debug, sprint, growth, etc.) pre-loaded with your context\n- **Auto-capture** — Works silently in the background, capturing every session\n- **Cross-platform** — Memories from Claude Desktop, Claude Code, Chrome extension, and more — all in one place\n\n**Tools included:**\n- `save_conversation` — Save any conversation to your memory (with `mode: 'replace' | 'append'`)\n- `save_artifact` — Save artifacts (research reports, tables, specs) linked to conversations\n- `recall_memories` — Search your memory with natural language\n- `get_memory_details` — Retrieve a full conversation by ID\n- `discover_related_conversations` — Find related memories across all platforms\n- `get_user_context` — View memory stats and recent activity\n- `run_workflow` — Run memory-powered workflows (PRD, debug, sprint, etc.)\n- `list_workflows` — Browse all available workflows by category\n- `share_memory` — Share a memory publicly with a shareable link\n- `recall_public` — Search publicly shared memories from all users\n- `get_public_memory` — Retrieve a publicly shared memory by ID\n- `report_memory` — Report inappropriate or harmful public memories",
   "author": {
@@ -66,6 +66,22 @@
     {
       "name": "snapshot",
       "description": "Generate a state-shaped artifact for a topic from your saved memories — used by /snapshot slash command"
+    },
+    {
+      "name": "snapshot_sources",
+      "description": "Fetch citation bundle + conflict detection for a topic so the LLM can synthesize a snapshot in-context (Step 1 of MCP snapshot path, ADR-032 Amendment A)"
+    },
+    {
+      "name": "save_snapshot",
+      "description": "Persist a synthesized snapshot as a draft (Step 3 of MCP snapshot path, ADR-032 Amendment A)"
+    },
+    {
+      "name": "get_snapshot",
+      "description": "Read an existing canonical snapshot into context — fast, no LLM calls"
+    },
+    {
+      "name": "accept_snapshot",
+      "description": "Promote a draft snapshot to canonical, superseding the prior canonical for this topic"
     },
     {
       "name": "recall_memories",
