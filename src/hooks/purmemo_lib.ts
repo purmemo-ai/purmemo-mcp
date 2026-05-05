@@ -218,9 +218,40 @@ export function pruneState(state: Record<string, unknown>): Record<string, unkno
 // is locked by tests/profile-resolver-contract.test.js — if that test fails,
 // the two read paths have drifted and hooks will silently auth as nobody.
 
-function getEncryptionKey(): Buffer {
+const KEY_FILE_NAME = '.encryption-key';
+
+function loadOrCreatePersistedKey(): Buffer {
+  const configDir = process.env.PURMEMO_CONFIG_DIR || path.join(os.homedir(), '.purmemo');
+  const keyFile = path.join(configDir, KEY_FILE_NAME);
+  try {
+    const existing = fs.readFileSync(keyFile, 'utf8').trim();
+    if (existing.length === 64 && /^[0-9a-f]+$/.test(existing)) {
+      return Buffer.from(existing, 'hex');
+    }
+  } catch { /* fall through to creation */ }
+
+  const fresh = crypto.randomBytes(32);
+  try {
+    if (!fs.existsSync(configDir)) {
+      fs.mkdirSync(configDir, { recursive: true });
+      if (process.platform !== 'win32') fs.chmodSync(configDir, 0o700);
+    }
+    fs.writeFileSync(keyFile, fresh.toString('hex'), { encoding: 'utf8', mode: 0o600 });
+  } catch (err) {
+    // Hook context: stay quiet on persist failure to avoid noisy startup
+    // banners. The current process still has a usable key in memory.
+    dbg('auth', `failed to persist encryption key: ${(err as Error).message}`);
+  }
+  return fresh;
+}
+
+function deriveLegacyKey(): Buffer {
   const machineId = os.hostname() + os.userInfo().username;
   return crypto.createHash('sha256').update(machineId).digest();
+}
+
+function getEncryptionKey(): Buffer {
+  return loadOrCreatePersistedKey();
 }
 
 /** Mirror of profile-resolver.ts:getActiveTokenFile() — see header note.
@@ -260,10 +291,39 @@ export function loadApiKey(): string | null {
     if (!fs.existsSync(tokenFile)) return null;
     const encryptedData = JSON.parse(fs.readFileSync(tokenFile, 'utf8'));
     const iv = Buffer.from(encryptedData.iv, 'hex');
-    const decipher = crypto.createDecipheriv('aes-256-cbc', getEncryptionKey(), iv);
-    let decrypted = decipher.update(encryptedData.data, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    return JSON.parse(decrypted).access_token || null;
+
+    // Try persisted key first.
+    try {
+      const decipher = crypto.createDecipheriv('aes-256-cbc', getEncryptionKey(), iv);
+      let decrypted = decipher.update(encryptedData.data, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      return JSON.parse(decrypted).access_token || null;
+    } catch { /* fall through to legacy */ }
+
+    // Fall back to legacy hostname-derived key. If it works, re-encrypt the
+    // file under the persisted key so the next read takes the fast path.
+    try {
+      const legacyDecipher = crypto.createDecipheriv('aes-256-cbc', deriveLegacyKey(), iv);
+      let decrypted = legacyDecipher.update(encryptedData.data, 'hex', 'utf8');
+      decrypted += legacyDecipher.final('utf8');
+      const tokenData = JSON.parse(decrypted);
+
+      try {
+        const newIv = crypto.randomBytes(16);
+        const cipher = crypto.createCipheriv('aes-256-cbc', getEncryptionKey(), newIv);
+        let reEncrypted = cipher.update(JSON.stringify(tokenData), 'utf8', 'hex');
+        reEncrypted += cipher.final('hex');
+        fs.writeFileSync(
+          tokenFile,
+          JSON.stringify({ iv: newIv.toString('hex'), data: reEncrypted }, null, 2),
+          { encoding: 'utf8', mode: 0o600 }
+        );
+      } catch (err) {
+        dbg('auth', `legacy decrypt ok but re-save failed: ${(err as Error).message}`);
+      }
+
+      return tokenData.access_token || null;
+    } catch { return null; }
   } catch { return null; }
 }
 
