@@ -168,8 +168,16 @@ class TokenStore {
           console.error('Token decrypt succeeded under legacy key but re-save failed:', (saveErr as Error).message);
         }
         return tokenData;
-      } catch (legacyErr) {
-        console.error('Failed to read token:', (legacyErr as Error).message);
+      } catch {
+        // Both keys failed. Token is unrecoverable — the file was encrypted
+        // under a key derived from a hostname we no longer have (ADR-039).
+        // Delete it so callers see "not authenticated" and route the user
+        // through re-OAuth instead of crashing on the cryptic OpenSSL error.
+        try { await fs.unlink(this.tokenFile); } catch { /* best-effort */ }
+        console.error(
+          'pūrmemo: stored token could not be decrypted (likely a hostname change). ' +
+          'Run `purmemo init` to sign in again.'
+        );
         return null;
       }
     }

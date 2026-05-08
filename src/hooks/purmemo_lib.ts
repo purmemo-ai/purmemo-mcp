@@ -323,7 +323,16 @@ export function loadApiKey(): string | null {
       }
 
       return tokenData.access_token || null;
-    } catch { return null; }
+    } catch {
+      // Both keys failed — file is unrecoverable (ADR-039 hostname drift past
+      // the legacy fallback window). Delete it so subsequent reads return
+      // null cleanly and the user is routed back through `purmemo init`.
+      // Stays silent on stderr — hooks run in stdio context where Claude
+      // parses stderr; debug log only.
+      try { fs.unlinkSync(tokenFile); } catch { /* best-effort */ }
+      dbg('auth', 'token unrecoverable under both persisted and legacy keys; deleted');
+      return null;
+    }
   } catch { return null; }
 }
 
