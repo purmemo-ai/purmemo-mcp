@@ -1,92 +1,105 @@
-# pūrmemo MCP Server
+# pūrmemo
 
 [![npm version](https://badge.fury.io/js/purmemo-mcp.svg)](https://www.npmjs.com/package/purmemo-mcp)
 [![npm downloads](https://img.shields.io/npm/dm/purmemo-mcp.svg)](https://www.npmjs.com/package/purmemo-mcp)
 [![Tests](https://github.com/purmemo-ai/purmemo-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/purmemo-ai/purmemo-mcp/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-blue.svg)](https://modelcontextprotocol.io)
 
-**Claude knows who you are before you say a word.**
+**Memory for your AI tools.** Claude remembers who you are, what you're working on, and what you said last time — across every session, on every platform.
 
-pūrmemo gives your AI a persistent memory and identity layer — your role, expertise, active projects, and conversation history — available instantly in every session, across every platform.
-
-> **Using ChatGPT, Claude.ai, or Gemini in browser?** Get the [Chrome Extension](https://purmemo.ai/extension) instead.
+> Just want it in ChatGPT or Claude.ai in your browser? Get the [Chrome Extension](https://chromewebstore.google.com/detail/p%C5%ABrmemo/moemdiomegehfjgjahfgjlbmikhnbhca) instead.
 
 ---
 
-## What It Does
+## Install in 30 seconds
 
-- **Remembers everything** — save conversations, decisions, and context; search them later with natural language
-- **Knows who you are** — your role, expertise, tools, and active projects load automatically at session start
-- **Works everywhere** — Claude Code, Claude Desktop, Cursor, Windsurf, Zed, and any MCP-compatible platform
+### 1. Paste this into your terminal
 
----
-
-## Quick Start
-
-### macOS / Linux
-
+**Mac or Linux:**
 ```bash
 curl -fsSL https://app.purmemo.ai/install | sh
 ```
 
-### Windows (PowerShell)
-
+**Windows (PowerShell):**
 ```powershell
 irm https://app.purmemo.ai/install.ps1 | iex
 ```
 
-The installer checks for Node.js, installs the `purmemo` CLI, and gets out of the way. Then run:
+That's it for installing. The script handles everything — it'll install Node if you don't have it, set up the `purmemo` command, and tell you when it's done.
+
+### 2. Type `purmemo`
 
 ```bash
 purmemo
 ```
 
-This opens your browser to sign in, configures the MCP server, and installs hooks + slash commands (`/save`, `/recall`, `/context`). That's it.
+Your browser opens. Sign in (or create a free account). Close the tab when it says you're done.
 
-> **Want to inspect the script first?** It's open source — read it at [scripts/install.sh](scripts/install.sh) or download and review locally before running.
+### 3. Restart Claude
 
-### Already have Node? Skip the installer
+Quit and reopen Claude Desktop (or Claude Code). pūrmemo is now connected.
+
+**You'll know it worked** when your next Claude session opens with a header like:
+
+```
+pūrmemo v15.7.20 · you@example.com · Free · 0 memories
+```
+
+Try saying "save this" at the end of a conversation, or "what was I working on?" at the start of a new one.
+
+---
+
+## If something goes wrong
+
+**`purmemo` command not found?** Close and reopen your terminal, then try again. New commands sometimes need a fresh shell.
+
+**You see "Failed to read token" or "bad decrypt"?** Run:
+```bash
+purmemo --update && purmemo init
+```
+This clears any stale credentials and signs you back in. (Fixed in v15.7.20+ — if you're on an older version, this is a one-time thing.)
+
+**Anything else?** Open an issue at [github.com/purmemo-ai/purmemo-mcp/issues](https://github.com/purmemo-ai/purmemo-mcp/issues) — we read every one.
+
+---
+
+## What it does
+
+- **Remembers everything** — save any conversation, recall it later by typing what you remember about it.
+- **Knows who you are** — your role, your projects, your stack — loaded automatically into every new session.
+- **Works everywhere** — Claude Code, Claude Desktop, Cursor, Windsurf, Zed, anything that speaks MCP.
+
+Three slash commands you'll use most:
+
+| You type | What happens |
+|----------|-------------|
+| `/save` | Saves this conversation. Use the same title later → updates the same memory. |
+| `/recall <topic>` | Search your memories in plain English. |
+| `/context` | At the start of a session — loads who you are and what you were last working on. |
+
+---
+
+## Other ways to install
+
+<details>
+<summary><b>I already have Node.js</b></summary>
 
 ```bash
 npm install -g purmemo-mcp && purmemo
 ```
 
-Or, without a global install:
+Or, run it once without installing globally:
 
 ```bash
 npx purmemo-mcp@latest init
 ```
 
-### Manual Setup (alternative)
-
-If you prefer to configure manually, or you're not using Claude Code:
-
-<details>
-<summary><b>Claude Code (Terminal) — manual</b></summary>
-
-1. Get your API key from [app.purmemo.ai](https://app.purmemo.ai) → Settings → API Keys
-
-```bash
-claude mcp add purmemo -e PURMEMO_API_KEY=your-api-key-here -- npx -y purmemo-mcp
-```
-
-Verify it connected:
-
-```bash
-claude mcp list
-# purmemo: npx -y purmemo-mcp - ✓ Connected
-```
-
 </details>
 
 <details>
-<summary><b>Claude Desktop (Remote MCP — Recommended)</b></summary>
+<summary><b>Claude Desktop — hosted (recommended, no setup)</b></summary>
 
-Use pūrmemo's hosted MCP server — no API key setup required, authenticates via OAuth:
-
-1. Open Claude Desktop → Settings → Developer → Edit Config
-2. Add this configuration:
+Open Claude Desktop → Settings → Developer → Edit Config and add:
 
 ```json
 {
@@ -99,15 +112,15 @@ Use pūrmemo's hosted MCP server — no API key setup required, authenticates vi
 }
 ```
 
-3. Restart Claude Desktop
-4. You'll be prompted to sign in via OAuth
+Restart Claude Desktop. You'll be prompted to sign in via OAuth on first use.
 
 </details>
 
 <details>
-<summary><b>Claude Desktop (Local NPX)</b></summary>
+<summary><b>Claude Desktop — local (advanced)</b></summary>
 
-Edit your config file:
+Get your API key from [app.purmemo.ai](https://app.purmemo.ai) → Settings → API Keys, then edit:
+
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
@@ -117,9 +130,7 @@ Edit your config file:
     "purmemo": {
       "command": "npx",
       "args": ["-y", "purmemo-mcp"],
-      "env": {
-        "PURMEMO_API_KEY": "your-api-key-here"
-      }
+      "env": { "PURMEMO_API_KEY": "your-api-key-here" }
     }
   }
 }
@@ -130,236 +141,21 @@ Restart Claude Desktop after saving.
 </details>
 
 <details>
-<summary><b>Cursor IDE</b></summary>
+<summary><b>Cursor / Windsurf / Zed</b></summary>
 
-Edit `~/.cursor/mcp.json` (macOS) or `%USERPROFILE%\.cursor\mcp.json` (Windows):
-
+**Cursor** — edit `~/.cursor/mcp.json`:
 ```json
-{
-  "mcpServers": {
-    "purmemo": {
-      "command": "npx",
-      "args": ["-y", "purmemo-mcp"],
-      "env": {
-        "PURMEMO_API_KEY": "your-api-key-here"
-      }
-    }
-  }
-}
+{ "mcpServers": { "purmemo": { "command": "npx", "args": ["-y", "purmemo-mcp"], "env": { "PURMEMO_API_KEY": "your-api-key" } } } }
 ```
-</details>
 
-<details>
-<summary><b>Windsurf IDE</b></summary>
+**Windsurf** — edit `~/.codeium/windsurf/mcp_config.json` (same shape as above).
 
-Edit `~/.codeium/windsurf/mcp_config.json`:
-
+**Zed** — edit `~/.config/zed/settings.json`, add under `context_servers`:
 ```json
-{
-  "mcpServers": {
-    "purmemo": {
-      "command": "npx",
-      "args": ["-y", "purmemo-mcp"],
-      "env": {
-        "PURMEMO_API_KEY": "your-api-key-here"
-      }
-    }
-  }
-}
+{ "context_servers": { "purmemo": { "command": { "path": "npx", "args": ["-y", "purmemo-mcp"], "env": { "PURMEMO_API_KEY": "your-api-key" } } } } }
 ```
+
 </details>
-
-<details>
-<summary><b>Zed Editor</b></summary>
-
-Add to `~/.config/zed/settings.json` under the `context_servers` key:
-
-```json
-{
-  "context_servers": {
-    "purmemo": {
-      "command": {
-        "path": "npx",
-        "args": ["-y", "purmemo-mcp"],
-        "env": {
-          "PURMEMO_API_KEY": "your-api-key-here"
-        }
-      }
-    }
-  }
-}
-```
-</details>
-
-### Start Using
-
-```
-You: "What's the project status?"
-Claude: Based on your identity and recent memories:
-  You're a founder working on a B2B SaaS product.
-  Recent work: pūrmemo (15 sessions), auth refactor (3 sessions)
-  Last session: "Fixed JWT refresh token rotation"
-```
-
----
-
-## What You Get
-
-### Resources (attach to any conversation via the `+` button)
-
-| Resource | What it contains |
-|----------|-----------------|
-| `memory://me` | Your identity: role, expertise, tools, active projects, what you're working on |
-| `memory://context` | Your 5 most recent conversation summaries |
-| `memory://projects` | All projects you've saved memories about, grouped and sorted by recency |
-| `memory://{id}` | Full content of any specific memory by ID |
-
-**Example — attach `memory://me` at session start:**
-
-```
-You are working with:
-**Chris** — Founder, B2B SaaS
-Expertise: product, fullstack, ai
-Tools: cursor, claude, supabase
-Style: systems thinker
-
-Recent work:
-- pūrmemo (15 recent sessions)
-- auth-refactor (4 recent sessions)
-
-Working on: MCP Resources + Prompts feature
-```
-
-No re-explaining who you are. No repeating your stack. Just continue.
-
-### Prompts (conversation starters in the `+` menu)
-
-| Prompt | What it does |
-|--------|-------------|
-| `load-context` | Load your full identity and recent memories to start a session |
-| `save-this-conversation` | Save the current conversation as a living document |
-| `catch-me-up` | Get a summary of recent work across all projects |
-| `weekly-review` | Review the week's progress and plan what's next |
-
----
-
-## Tools
-
-### Core
-
-| Tool | Description |
-|------|-------------|
-| `save_conversation` | Save conversations with smart titles and context extraction |
-| `save_artifact` | Save artifacts (research reports, tables, specs) linked to conversations |
-| `recall_memories` | Search memories with natural language |
-| `get_memory_details` | Get full details of a specific memory |
-| `discover_related_conversations` | Find related discussions across platforms |
-| `get_user_context` | Load your identity profile and recent work context |
-
-### Artifacts & Snapshots
-
-| Tool | Description |
-|------|-------------|
-| `commit` | Persist a commitment-shaped artifact (PRD, ADR, spec, OKR) — used by `/prd`, `/decide`, `/spec` |
-| `snapshot` | Generate a state-shaped artifact for a topic from your saved memories — used by `/snapshot` |
-| `snapshot_sources` | Fetch citation bundle + conflict detection for in-context synthesis (ADR-032 Amendment A) |
-| `save_snapshot` | Persist a synthesized snapshot as a draft |
-| `get_snapshot` | Read an existing canonical snapshot into context |
-| `accept_snapshot` | Promote a draft snapshot to canonical |
-
-### Workflows
-
-| Tool | Description |
-|------|-------------|
-| `run_workflow` | Run structured workflows (PRD, debug, sprint, deploy, etc.) |
-| `list_workflows` | List all available workflows by category |
-
-### Community
-
-| Tool | Description |
-|------|-------------|
-| `share_memory` | Set memory visibility (private, unlisted, or public) |
-| `recall_public` | Search public community memories (free for all tiers) |
-| `get_public_memory` | Get the full content of a shared memory |
-| `report_memory` | Report inappropriate public content |
-
-### Tasks & Investigation
-
-| Tool | Description |
-|------|-------------|
-| `get_next_task` | Get the next pending task from your queue |
-| `complete_task` | Mark a task complete with optional notes |
-| `generate_handoff_brief` | Generate a handoff brief for the current session |
-| `save_test_result` | Save a test run result linked to a conversation |
-| `get_acknowledged_errors` | Fetch acknowledged production errors awaiting investigation |
-| `save_investigation_result` | Save error investigation results for audit trail |
-
-**`get_user_context` in action:**
-
-```
-You: "What have I been working on?"
-Claude: [calls get_user_context]
-
-Your profile: Founder · B2B SaaS · fullstack/ai/product
-Active projects:
-  • pūrmemo — "MCP server resources and prompts" (15 sessions)
-  • auth-refactor — "JWT refresh token fix" (4 sessions)
-Working on: MCP Resources + Prompts feature
-```
-
----
-
-## Identity Layer
-
-pūrmemo maintains a **cognitive fingerprint** — a persistent profile of who you are that loads automatically into every session.
-
-Set it once at [app.purmemo.ai](https://app.purmemo.ai) → Settings → Identity:
-
-- **Role** — founder, engineer, designer, researcher, ...
-- **Domain** — your primary field (B2B SaaS, ML research, design systems, ...)
-- **Expertise** — your key skills (product, fullstack, ai, ...)
-- **Tools** — what you work with (cursor, claude, supabase, ...)
-- **Work style** — how you think (systems thinker, iterative builder, ...)
-- **Working on** — your current focus, updated per session
-
-Once set, every new session inherits this context. Claude already knows your background, your stack, and what you were doing last time — without you having to explain it.
-
----
-
-## Slash Commands (Claude Code)
-
-After installing the slash commands (see Claude Code setup above):
-
-| Command | What it does |
-|---------|-------------|
-| `/save` | Save the current conversation as a living document memory |
-| `/recall [topic]` | Search past memories by topic |
-| `/context` | Session startup — loads your identity + recent work |
-
-The `/context` command is especially useful at the start of a session: it calls `get_user_context` and surfaces your identity and recent work so Claude already knows where you left off.
-
----
-
-## Living Document Pattern
-
-Same title (or `conversationId`) targets the same memory. Update behavior is controlled by the `mode` parameter:
-
-- **`mode: "append"`** — concatenates new content below existing with a timestamped separator (`\n\n--- UPDATE <ISO8601> ---\n\n`). Prior content stays visible inline. The `/save` slash command uses this automatically — ideal for genuine living documents.
-- **`mode: "replace"`** (default for direct tool calls) — overwrites existing content. Prior content is snapshotted to the `memory_events` audit log but not surfaced by recall. Use for one-shot captures and ad-hoc snapshots.
-
-```
-You: "/save"  (Claude calls save_conversation with mode='append')
-Claude: ✅ Saved — "auth-refactor" (new, mode=append)
-
-[... continue working ...]
-
-You: "/save"  (more progress, same title)
-Claude: ✅ Appended — "auth-refactor" (mode=append; prior content + new content with timestamp separator)
-```
-
-Long conversations? Auto-chunked at 15K+ characters and reassembled on recall. **Append mode works only for content <15K chars.** Saves >15K with `mode='append'` are rejected — appending to chunked storage would double each chunk's content on re-save. For long-running living docs, send only the new delta since the last save (keep it <15K) or use `mode='replace'` for a full re-save.
-
-> **Known caveat:** a doc that starts small (single-memory) and later grows past 15K characters transitions to chunked storage at a new `conversation_id` namespace. The original single memory becomes orphaned. To avoid the orphan, pass an explicit `conversationId` if you anticipate growth. Full namespace unification is tracked under ADR-038.
 
 ---
 
@@ -372,25 +168,27 @@ Long conversations? Auto-chunked at 15K+ characters and reassembled on recall. *
 
 ---
 
-## Links
+## For developers
 
-- [Dashboard](https://app.purmemo.ai) — View and manage memories
-- [Chrome Extension](https://purmemo.ai/extension) — For ChatGPT, Claude.ai, Gemini
-- [Documentation](https://github.com/purmemo-ai/purmemo-mcp/tree/main/docs)
-- [Support](https://github.com/purmemo-ai/purmemo-mcp/issues)
+Looking for the technical stuff? It's all here:
+
+- **[Tools, resources, prompts reference](docs/REFERENCE.md)** — every MCP tool the server exposes (`save_conversation`, `recall_memories`, `commit`, `snapshot`, `run_workflow`, etc.)
+- **[Living document semantics](docs/LIVING_DOCUMENTS.md)** — `mode='append'` vs `mode='replace'`, chunking behavior, ADR-036/038 details.
+- **[Identity layer](docs/IDENTITY.md)** — the cognitive fingerprint that loads into every session.
+- **[Architecture decisions (ADRs)](docs/adr/)** — every design decision, with context and trade-offs.
+- **[Source for the install scripts](scripts/)** — read before running, if you want.
 
 ---
 
-## Privacy
+## Links
 
-Your data is encrypted in transit (HTTPS) and at rest. It is never shared with third parties and is accessible only to you via your API key.
-
-See our [Privacy Policy](https://purmemo.ai/privacy) for details.
+- **[Dashboard](https://app.purmemo.ai)** — view and manage memories
+- **[Chrome Extension](https://chromewebstore.google.com/detail/p%C5%ABrmemo/moemdiomegehfjgjahfgjlbmikhnbhca)** — for ChatGPT, Claude.ai, Gemini in browser
+- **[Privacy Policy](https://purmemo.ai/privacy)** — encrypted in transit and at rest, never shared
+- **[Support / Issues](https://github.com/purmemo-ai/purmemo-mcp/issues)**
 
 ---
 
 ## License
 
-This MCP client package is [MIT licensed](./LICENSE) — you can use, fork, and modify it freely.
-
-The **pūrmemo platform, API, and backend** are proprietary and closed-source. MIT applies only to the connector code in this repository, not to the service it connects to.
+The MCP connector code in this repo is [MIT licensed](./LICENSE). The pūrmemo platform, API, and backend are proprietary.

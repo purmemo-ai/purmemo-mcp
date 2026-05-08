@@ -171,13 +171,17 @@ class TokenStore {
       } catch {
         // Both keys failed. Token is unrecoverable — the file was encrypted
         // under a key derived from a hostname we no longer have (ADR-039).
-        // Delete it so callers see "not authenticated" and route the user
-        // through re-OAuth instead of crashing on the cryptic OpenSSL error.
+        // Delete it AND drop a recovery marker so the bare-purmemo TTY entry
+        // point in server.ts can auto-launch re-OAuth with a friendly note,
+        // instead of telling the user to type a command.
         try { await fs.unlink(this.tokenFile); } catch { /* best-effort */ }
-        console.error(
-          'pūrmemo: stored token could not be decrypted (likely a hostname change). ' +
-          'Run `purmemo init` to sign in again.'
-        );
+        try {
+          writeFileSync(
+            path.join(this.configDir, '.recovery-needed'),
+            new Date().toISOString(),
+            { encoding: 'utf8', mode: 0o600 }
+          );
+        } catch { /* best-effort */ }
         return null;
       }
     }

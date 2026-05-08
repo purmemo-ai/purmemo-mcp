@@ -2083,14 +2083,20 @@ if (REMOTE_MODE) {
   // ========================================================================
 
   // If running interactively in a terminal (not piped by an MCP client) and
-  // no auth is configured, redirect to setup instead of silently hanging.
+  // no auth is configured, redirect into setup directly. Covers two cases:
+  //   1. Fresh install — first run after curl install, no token yet
+  //   2. Auto-recovery — token-store deleted an unrecoverable file (ADR-039)
+  // In both cases we hand the user straight to OAuth instead of telling
+  // them to type another command.
   if (process.stdin.isTTY) {
     const _ts = new TokenStore();
     const _tok = await _ts.getToken();
     if (!_tok?.access_token) {
-      console.log('\n🧠 pūrmemo MCP — Memory for your AI tools\n');
-      console.log('Not connected yet. Run setup to get started:\n');
-      console.log('  npx purmemo-mcp setup\n');
+      const __dirname = path.dirname(fileURLToPath(import.meta.url));
+      const setupPath = path.join(__dirname, 'setup.js');
+      // setup.js manages its own lifecycle (calls process.exit on completion);
+      // await keeps this branch alive long enough for it to take over.
+      await import(setupPath).catch(err => { console.error(err); process.exit(1); });
       process.exit(0);
     }
   }

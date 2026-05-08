@@ -348,6 +348,18 @@ function detectCurrentInstallMethod(): InstallMethod {
 async function runSetup(forceNewProfile = false) {
   console.log(chalk.cyan(banner));
 
+  // Auto-recovery from bad-decrypt: when token-store deleted an unrecoverable
+  // file (post-ADR-039 hostname drift past the legacy fallback), it dropped
+  // a `.recovery-needed` marker. Show a friendly explanation so the user
+  // understands why we're re-prompting sign-in. Marker is cleared on success.
+  const _recoveryMarker = path.join(getConfigDir(), '.recovery-needed');
+  const _isRecovery = fs.existsSync(_recoveryMarker);
+  if (_isRecovery) {
+    console.log(chalk.yellow('⚡ Reconnecting your sign-in'));
+    console.log(chalk.gray('   Your stored credentials couldn\'t be read — usually after a Wi-Fi'));
+    console.log(chalk.gray('   or VPN change. Signing you back in now (one tap in the browser).\n'));
+  }
+
   // `add` re-runs OAuth into a new profile even if already connected.
   // Skip the "already connected" short-circuit in that case.
   const existing = forceNewProfile ? null : await tokenStore.getToken();
@@ -455,6 +467,7 @@ async function runSetup(forceNewProfile = false) {
       await tokenStore.saveToken(tokenData);
     }
     syncKeyToShellRc(process.env.PURMEMO_API_KEY);
+    try { fs.unlinkSync(_recoveryMarker); } catch { /* fine if absent */ }
 
     console.log(chalk.green.bold('🎉 Connected!\n'));
     console.log(chalk.gray(`   Account: ${user.email}`));
@@ -546,6 +559,7 @@ async function runSetup(forceNewProfile = false) {
         await tokenStore.saveToken(tokenData);
       }
       syncKeyToShellRc(pollData.api_key);
+      try { fs.unlinkSync(_recoveryMarker); } catch { /* fine if absent */ }
 
       console.log(chalk.green.bold('\n🎉 Connected!\n'));
       console.log(chalk.gray(`   Account: ${pollData.email || 'connected'}`));
