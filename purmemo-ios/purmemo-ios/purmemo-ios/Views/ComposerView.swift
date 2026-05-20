@@ -271,15 +271,25 @@ class VoiceService {
                 }
             }
             if error != nil || result?.isFinal == true {
-                self.audioEngine.stop()
-                self.audioEngine.inputNode.removeTap(onBus: 0)
-                self.recognitionRequest = nil
-                self.recognitionTask = nil
+                // Full teardown on the main actor so audio engine + recognizer
+                // state are released before the next session is created.
+                // Without this, iOS 26 accumulates leaked audio buffers across
+                // restarts and OOM-kills the app after a few minutes.
+                DispatchQueue.main.async {
+                    self.audioEngine.stop()
+                    self.audioEngine.inputNode.removeTap(onBus: 0)
+                    self.recognitionRequest?.endAudio()
+                    self.recognitionRequest = nil
+                    self.recognitionTask = nil
 
-                // Seamlessly restart recognition for continuous listening
-                if self.isActive {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        self.beginRecognition()
+                    // Restart only if still active, after a real delay so the
+                    // previous recognizer fully deallocates before the new one
+                    // claims the same audio resources.
+                    if self.isActive {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            guard self.isActive else { return }
+                            self.beginRecognition()
+                        }
                     }
                 }
             }
