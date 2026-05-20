@@ -448,7 +448,7 @@ struct ProjectsView: View {
                 sourceIndex: sourceIndex,
                 projectName: project
             )
-            withAnimation { addedTodoIds.insert(key) }
+            _ = withAnimation { addedTodoIds.insert(key) }
         } catch {}
     }
 

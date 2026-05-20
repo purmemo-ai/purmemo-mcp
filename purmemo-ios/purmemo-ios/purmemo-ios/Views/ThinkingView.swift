@@ -159,6 +159,16 @@ struct ThinkingView: View {
             ThinkingViewState.shared.isFlipped = newValue == 1
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
+        // Mirror external flips (e.g. re-tapping the third tab in PurmemoApp)
+        // back into selectedPage so the inner TabView actually swipes.
+        .onChange(of: ThinkingViewState.shared.isFlipped) { _, newValue in
+            let target = newValue ? 1 : 0
+            if selectedPage != target {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    selectedPage = target
+                }
+            }
+        }
         .onDisappear { stopClaudeStream() }
     }
 
@@ -658,7 +668,12 @@ struct ThinkingView: View {
     private func sendToClaude(_ todo: TodoItem) async {
         let api = PurmemoAPI(authService: authService)
         do {
-            let message = try await api.sendClaudeChannelMessage(content: todo.text)
+            // Forward projectName so AMP can route to the matching Claude Code session
+            // by CWD match (urgent.json + claude_channel.json routing, 2026-05-13).
+            let message = try await api.sendClaudeChannelMessage(
+                content: todo.text,
+                projectName: todo.projectName
+            )
             withAnimation {
                 claudeMessages.insert(message, at: 0)
             }
@@ -671,7 +686,7 @@ struct ThinkingView: View {
         do {
             try await api.deleteClaudeChannelMessage(id: message.id)
             if let idx = claudeMessages.firstIndex(where: { $0.id == message.id }) {
-                withAnimation { claudeMessages.remove(at: idx) }
+                _ = withAnimation { claudeMessages.remove(at: idx) }
             }
         } catch {}
     }
@@ -718,7 +733,7 @@ struct ThinkingView: View {
         do {
             try await api.updateTodo(id: todo.id, snoozedUntil: tomorrow)
             if let idx = todos.firstIndex(where: { $0.id == todo.id }) {
-                withAnimation { todos.remove(at: idx) }
+                _ = withAnimation { todos.remove(at: idx) }
             }
         } catch {}
     }
@@ -736,10 +751,10 @@ struct ThinkingView: View {
         do {
             try await api.deleteTodo(id: todo.id)
             if let idx = todos.firstIndex(where: { $0.id == todo.id }) {
-                withAnimation { todos.remove(at: idx) }
+                _ = withAnimation { todos.remove(at: idx) }
             }
             if let idx = completedTodos.firstIndex(where: { $0.id == todo.id }) {
-                withAnimation { completedTodos.remove(at: idx) }
+                _ = withAnimation { completedTodos.remove(at: idx) }
             }
         } catch {}
     }

@@ -196,7 +196,7 @@ class OAuthPresentationContext: NSObject, ASWebAuthenticationPresentationContext
     static let shared = OAuthPresentationContext()
 
     nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        return ASPresentationAnchor()
+        return MainActor.assumeIsolated { ASPresentationAnchor() }
     }
 
     deinit {}
