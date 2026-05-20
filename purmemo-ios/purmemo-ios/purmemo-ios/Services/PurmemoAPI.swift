@@ -158,6 +158,169 @@ class PurmemoAPI {
         }
     }
 
+    // MARK: - Upload Voice Note (multipart audio)
+
+    func uploadVoiceNote(memoryId: String, fileURL: URL, durationSeconds: Int) async throws {
+        let token = try await authService.validToken()
+        let url = URL(string: "\(baseURL)/api/v1/memories/\(memoryId)/audio")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        // Audio transcription can take 30+ seconds for long voice notes.
+        request.timeoutInterval = 300
+
+        let boundary = UUID().uuidString
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        let audioData = try Data(contentsOf: fileURL)
+
+        var body = Data()
+
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"audio\"; filename=\"voice-note.m4a\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: audio/mp4\r\n\r\n".data(using: .utf8)!)
+        body.append(audioData)
+        body.append("\r\n".data(using: .utf8)!)
+
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"duration_seconds\"\r\n\r\n".data(using: .utf8)!)
+        body.append("\(durationSeconds)\r\n".data(using: .utf8)!)
+
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        do {
+            let (_, response) = try await perform(request)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                throw APIError.serverError(http.statusCode)
+            }
+        } catch let error as URLError where error.code == .cancelled || error.code == .networkConnectionLost || error.code == .timedOut {
+            print("[audio-upload] tolerated client abort for memory=\(memoryId): \(error.code.rawValue)")
+            throw APIError.clientAborted
+        }
+    }
+
+    // MARK: - Retry Audio Transcription
+
+    /// Re-enqueue a failed transcription job. Uses the storage_path the
+    /// original upload stashed on the memory's metadata, so no audio is
+    /// re-uploaded — only the job row is recreated and the worker kicked.
+    func retryAudioTranscription(memoryId: String) async throws {
+        let token = try await authService.validToken()
+        let url = URL(string: "\(baseURL)/api/v1/memories/\(memoryId)/audio/retry")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 30
+
+        let (_, response) = try await perform(request)
+        if let http = response as? HTTPURLResponse, http.statusCode == 401 {
+            let newToken = try await authService.refreshToken()
+            request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
+            let (_, retryResp) = try await perform(request)
+            if let http = retryResp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                throw APIError.serverError(http.statusCode)
+            }
+            return
+        }
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw APIError.serverError(http.statusCode)
+        }
+    }
+
+    // MARK: - Trash (list + restore)
+
+    struct TrashedMemory: Identifiable {
+        let id: String
+        let title: String?
+        let deletedAt: String?
+        let createdAt: String?
+        let hasAudio: Bool
+        let hasImages: Bool
+    }
+
+    func listTrashed(limit: Int = 100) async throws -> [TrashedMemory] {
+        let token = try await authService.validToken()
+        let url = URL(string: "\(baseURL)/api/v1/memories/trash?limit=\(limit)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
+
+        let (data, response) = try await perform(request)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw APIError.serverError(http.statusCode)
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw APIError.decodingError
+        }
+        let rows = (json["memories"] as? [[String: Any]]) ?? (json["items"] as? [[String: Any]]) ?? []
+        return rows.compactMap { m -> TrashedMemory? in
+            guard let id = m["id"] as? String else { return nil }
+            let metadata = m["metadata"] as? [String: Any]
+            return TrashedMemory(
+                id: id,
+                title: m["title"] as? String,
+                deletedAt: m["deleted_at"] as? String,
+                createdAt: m["created_at"] as? String,
+                hasAudio: (m["has_audio"] as? Bool) ?? (metadata?["audio_storage_path"] is String),
+                hasImages: (m["has_images"] as? Bool) ?? ((m["image_count"] as? Int ?? 0) > 0)
+            )
+        }
+    }
+
+    func restoreMemory(memoryId: String) async throws {
+        let token = try await authService.validToken()
+        let url = URL(string: "\(baseURL)/api/v1/memories/\(memoryId)/restore")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
+
+        let (_, response) = try await perform(request)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw APIError.serverError(http.statusCode)
+        }
+    }
+
+    // MARK: - Delete Memory (soft delete)
+
+    func deleteMemory(memoryId: String) async throws {
+        let token = try await authService.validToken()
+        let url = URL(string: "\(baseURL)/api/v1/memories/\(memoryId)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
+
+        let (_, response) = try await perform(request)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw APIError.serverError(http.statusCode)
+        }
+    }
+
+    // MARK: - Voice Note Signed URL
+
+    func getVoiceNoteSignedURL(memoryId: String) async throws -> URL {
+        let token = try await authService.validToken()
+        let url = URL(string: "\(baseURL)/api/v1/memories/\(memoryId)/audio/url")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
+
+        let (data, response) = try await perform(request)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw APIError.serverError(http.statusCode)
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let urlString = json["url"] as? String,
+              let signed = URL(string: urlString) else {
+            throw APIError.decodingError
+        }
+        return signed
+    }
+
     // MARK: - Get Memory Images
 
     func getMemoryImages(memoryId: String) async throws -> [String] {
@@ -245,6 +408,9 @@ class PurmemoAPI {
         var items: [MediaItem] = []
         if let memories = json["memories"] as? [[String: Any]] {
             for m in memories {
+                let metadata = m["metadata"] as? [String: Any]
+                let hasAudio = (m["has_audio"] as? Bool)
+                    ?? (metadata?["audio_storage_path"] is String)
                 items.append(MediaItem(
                     id: m["id"] as? String ?? "",
                     title: m["title"] as? String,
@@ -254,6 +420,10 @@ class PurmemoAPI {
                     thumbnailUrl: m["thumbnail_url"] as? String,
                     imageCount: m["image_count"] as? Int ?? 0,
                     hasImages: m["has_images"] as? Bool ?? false,
+                    hasAudio: hasAudio,
+                    audioDurationSeconds: metadata?["audio_duration_seconds"] as? Int,
+                    audioHasTranscript: (metadata?["audio_has_transcript"] as? Bool) ?? false,
+                    audioPending: (metadata?["audio_pending"] as? Bool) ?? false,
                     createdAt: m["created_at"] as? String,
                     category: m["category"] as? String
                 ))
@@ -402,6 +572,12 @@ class PurmemoAPI {
             return MemoryCompletion(text: text)
         }
 
+        // Voice-note state pulled from the memory's metadata jsonb.
+        let metadata = m["metadata"] as? [String: Any] ?? [:]
+        let audioPending = metadata["audio_pending"] as? Bool ?? false
+        let audioHasTranscript = metadata["audio_has_transcript"] as? Bool ?? false
+        let audioTranscriptError = metadata["audio_transcript_error"] as? String
+
         return FullMemory(
             id: m["id"] as? String ?? "",
             title: m["title"] as? String,
@@ -425,7 +601,10 @@ class PurmemoAPI {
             image_count: m["image_count"] as? Int ?? 0,
             has_images: m["has_images"] as? Bool ?? false,
             word_count: m["word_count"] as? Int,
-            read_time_minutes: m["read_time_minutes"] as? Int
+            read_time_minutes: m["read_time_minutes"] as? Int,
+            audioPending: audioPending,
+            audioHasTranscript: audioHasTranscript,
+            audioTranscriptError: audioTranscriptError
         )
     }
 
@@ -871,12 +1050,14 @@ enum APIError: LocalizedError {
     case networkError(String)
     case decodingError
     case serverError(Int)
+    case clientAborted
 
     var errorDescription: String? {
         switch self {
         case .networkError(let msg): return "Network error: \(msg)"
         case .decodingError:         return "Failed to parse response"
         case .serverError(let code): return "Server error (\(code))"
+        case .clientAborted:         return "Upload interrupted — will retry"
         }
     }
 }
