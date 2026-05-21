@@ -2476,6 +2476,50 @@ export async function handleSaveTestResult(args) {
   }
 }
 
+
+export async function handleGetArtifacts(args) {
+  try {
+    const parentId = (args.parent_conversation_id || '').trim();
+    const limit = Math.min(Number(args.limit) || 20, 100);
+    if (!parentId) {
+      return { content: [{ type: 'text', text: '❌ Missing required field: parent_conversation_id' }] };
+    }
+    const params = new URLSearchParams({ limit: String(limit), parent_conversation_id: parentId });
+    if (args.artifact_type) params.set('artifact_type', String(args.artifact_type));
+    const response = await makeApiCall(`/api/v1/memories?${params.toString()}`, { method: 'GET' });
+    const items = response.memories || response.items || [];
+    if (items.length === 0) return { content: [{ type: 'text', text: `No artifacts linked to ${parentId}.` }] };
+    const lines = [`📎 Artifacts (${items.length}) for ${parentId}`, ''];
+    for (const a of items) {
+      lines.push(`• ${a.title || a.id}  [${a.artifact_type || '?'}]  ${(a.created_at || '').slice(0,19)}`);
+    }
+    return { content: [{ type: 'text', text: lines.join('\n') }] };
+  } catch (error) {
+    return { content: [{ type: 'text', text: `❌ Error fetching artifacts: ${error.message}` }] };
+  }
+}
+
+export async function handleGetInvestigations(args) {
+  try {
+    const params = new URLSearchParams();
+    if (args.incident_id) params.set('incident_id', String(args.incident_id));
+    if (args.status) params.set('status', String(args.status));
+    params.set('limit', String(Math.min(Number(args.limit) || 25, 100)));
+    const response = await makeApiCall(`/api/v1/admin/investigations?${params.toString()}`, { method: 'GET' });
+    const items = response.investigations || [];
+    if (items.length === 0) return { content: [{ type: 'text', text: 'No investigations found.' }] };
+    const lines = [`🔬 Investigations (${items.length})`, ''];
+    for (const inv of items) {
+      const emoji = inv.investigation_status === 'completed' ? '✅' : '⏳';
+      lines.push(`${emoji} ${inv.id}  incident=${inv.incident_id}  fix=${inv.fix_type || '?'}  risk=${inv.risk_level || '?'}  ${(inv.created_at || '').slice(0,19)}`);
+      if (inv.root_cause_analysis) lines.push(`   root cause: ${inv.root_cause_analysis.slice(0, 200)}`);
+    }
+    return { content: [{ type: 'text', text: lines.join('\n') }] };
+  } catch (error) {
+    return { content: [{ type: 'text', text: `❌ Error fetching investigations: ${error.message}` }] };
+  }
+}
+
 export async function handleGetTestResults(args) {
   try {
     const projectName = (args.project_name || '').trim();

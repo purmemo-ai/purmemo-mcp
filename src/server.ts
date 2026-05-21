@@ -87,6 +87,8 @@ import {
   handleSaveInvestigation,
   handleSaveTestResult,
   handleGetTestResults,
+  handleGetArtifacts,
+  handleGetInvestigations,
   handleGetNextTask,
   handleCompleteTask,
   handleSnapshotSources,
@@ -1453,6 +1455,33 @@ RETURNS:
     }
   },
   {
+    name: 'get_artifacts',
+    annotations: { title: 'Get Artifacts', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    description: 'List artifacts linked to a parent conversation. Pairs with save_artifact.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        parent_conversation_id: { type: 'string', description: 'Parent conversation id that artifacts were saved against' },
+        artifact_type: { type: 'string', description: 'Optional filter: research|code|table|framework|spec|diagram|other' },
+        limit: { type: 'number', description: 'Max rows (default 20, max 100)' }
+      },
+      required: ['parent_conversation_id']
+    }
+  },
+  {
+    name: 'get_investigations',
+    annotations: { title: 'Get Investigations', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    description: 'List error investigation results (admin). Pairs with save_investigation_result.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        incident_id: { type: 'string', description: 'Optional: filter by a specific incident' },
+        status: { type: 'string', description: 'Optional: in_progress | completed' },
+        limit: { type: 'number', description: 'Max rows (default 25, max 100)' }
+      }
+    }
+  },
+  {
     name: 'get_next_task',
     annotations: {
       title: 'Get Next Task',
@@ -1761,6 +1790,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return withUpdateNotice(await handleSaveTestResult(args));
     case 'get_test_results':
       return withUpdateNotice(await handleGetTestResults(args));
+    case 'get_artifacts':
+      return withUpdateNotice(await handleGetArtifacts(args));
+    case 'get_investigations':
+      return withUpdateNotice(await handleGetInvestigations(args));
     case 'get_next_task':
       return withUpdateNotice(await handleGetNextTask(args));
     case 'complete_task':
