@@ -86,6 +86,7 @@ import {
   handleGetAcknowledgedErrors,
   handleSaveInvestigation,
   handleSaveTestResult,
+  handleGetTestResults,
   handleGetNextTask,
   handleCompleteTask,
   handleSnapshotSources,
@@ -1421,6 +1422,37 @@ RETURNS:
     }
   },
   {
+    name: 'get_test_results',
+    annotations: {
+      title: 'Get Test Results',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    },
+    description: `List recent test results for a project, newest first.
+
+Pairs with save_test_result — use this to recall past test outcomes without
+having to query the conversational memory layer.
+
+USAGE:
+- Latest 50 results: get_test_results({ project_name: "polymathematics" })
+- Only failures: get_test_results({ project_name, passed: false })
+- Custom limit: get_test_results({ project_name, limit: 10 })
+
+RETURNS:
+- results[] — each with id, test_suite, passed, failure_details, updated_at`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_name: { type: 'string', description: 'The project name' },
+        passed:       { type: 'boolean', description: 'Filter: only passed (true) or only failed (false). Omit for all.' },
+        limit:        { type: 'number', description: 'Max rows (default 50, max 200)' }
+      },
+      required: ['project_name']
+    }
+  },
+  {
     name: 'get_next_task',
     annotations: {
       title: 'Get Next Task',
@@ -1727,6 +1759,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return withUpdateNotice(await handleGenerateHandoffBrief(args));
     case 'save_test_result':
       return withUpdateNotice(await handleSaveTestResult(args));
+    case 'get_test_results':
+      return withUpdateNotice(await handleGetTestResults(args));
     case 'get_next_task':
       return withUpdateNotice(await handleGetNextTask(args));
     case 'complete_task':

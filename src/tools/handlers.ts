@@ -2476,6 +2476,44 @@ export async function handleSaveTestResult(args) {
   }
 }
 
+export async function handleGetTestResults(args) {
+  try {
+    const projectName = (args.project_name || '').trim();
+    if (!projectName) {
+      return {
+        content: [{ type: 'text', text: '❌ Missing required field: project_name' }]
+      };
+    }
+
+    const limit = Math.min(Number(args.limit) || 50, 200);
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (args.passed === true) params.set('passed', 'true');
+    if (args.passed === false) params.set('passed', 'false');
+
+    const response = await makeApiCall(
+      `/api/v1/projects/${encodeURIComponent(projectName)}/test_results?${params.toString()}`,
+      { method: 'GET' }
+    );
+
+    const results = response.results || [];
+    if (results.length === 0) {
+      return { content: [{ type: 'text', text: `No test results for project "${projectName}".` }] };
+    }
+    const lines = [`📊 Test Results — ${projectName} (${results.length})`, ''];
+    for (const r of results) {
+      const emoji = r.passed ? '✅' : '❌';
+      const when = r.updated_at ? new Date(r.updated_at).toISOString().slice(0, 19).replace('T', ' ') : '';
+      lines.push(`${emoji} ${r.test_suite}  ${when}`);
+      if (!r.passed && r.failure_details) lines.push(`   ${r.failure_details.slice(0, 200)}`);
+    }
+    return { content: [{ type: 'text', text: lines.join('\n') }] };
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `❌ Error fetching test results: ${error.message}` }]
+    };
+  }
+}
+
 export async function handleGetNextTask(args) {
   try {
     const projectName = (args.project_name || '').trim();
