@@ -1,0 +1,26 @@
+name: Deploy to polymathematics
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: poly-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger deploy on polymathematics
+        env:
+          POLY_SSH_KEY: ${{ secrets.POLY_SSH_KEY }}
+          POLY_HOST: ${{ secrets.POLY_HOST }}
+          POLY_USER: ${{ secrets.POLY_USER }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$POLY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$POLY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -i ~/.ssh/id_ed25519 "$POLY_USER@$POLY_HOST" "/usr/local/bin/poly-deploy.sh purmemo-mcp"
