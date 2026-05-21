@@ -2548,7 +2548,10 @@ export async function handleGetTestResults(args) {
       const emoji = r.passed ? '✅' : '❌';
       const when = r.updated_at ? new Date(r.updated_at).toISOString().slice(0, 19).replace('T', ' ') : '';
       lines.push(`${emoji} ${r.test_suite}  ${when}`);
-      if (!r.passed && r.failure_details) lines.push(`   ${r.failure_details.slice(0, 200)}`);
+      if (!r.passed && r.failure_details) {
+        const indented = r.failure_details.replace(/\r?\n/g, '\n   ');
+        lines.push(`   ${indented}`);
+      }
     }
     return { content: [{ type: 'text', text: lines.join('\n') }] };
   } catch (error) {
