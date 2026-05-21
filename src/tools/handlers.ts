@@ -2512,7 +2512,10 @@ export async function handleGetInvestigations(args) {
     for (const inv of items) {
       const emoji = inv.investigation_status === 'completed' ? '✅' : '⏳';
       lines.push(`${emoji} ${inv.id}  incident=${inv.incident_id}  fix=${inv.fix_type || '?'}  risk=${inv.risk_level || '?'}  ${(inv.created_at || '').slice(0,19)}`);
-      if (inv.root_cause_analysis) lines.push(`   root cause: ${inv.root_cause_analysis.slice(0, 200)}`);
+      if (inv.root_cause_analysis) {
+        const indented = inv.root_cause_analysis.replace(/\r?\n/g, '\n   ');
+        lines.push(`   root cause: ${indented}`);
+      }
     }
     return { content: [{ type: 'text', text: lines.join('\n') }] };
   } catch (error) {
