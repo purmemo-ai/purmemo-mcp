@@ -7,6 +7,7 @@
  */
 
 import { structuredLog } from '../lib/logger.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { apiCircuitBreaker, runWithApiKey } from '../lib/api-client.js';
 import {
   handleSaveConversation,
