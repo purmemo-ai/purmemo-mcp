@@ -15,7 +15,10 @@
  * payloads, never user content, never raw stacks.
  */
 
-const API_BASE = process.env.PURMEMO_API_URL || 'https://api.purmemo.ai';
+// Strip any trailing slash: PURMEMO_API_URL is set with a trailing "/" in the
+// box env, which produced a double-slash URL (api.purmemo.ai//api/v1/...) that
+// the API 404s — silently dropping every MCP incident report (found 2026-06-13).
+const API_BASE = (process.env.PURMEMO_API_URL || 'https://api.purmemo.ai').replace(/\/+$/, '');
 
 let warnedMissing = false;
 
