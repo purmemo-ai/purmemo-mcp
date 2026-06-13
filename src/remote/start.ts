@@ -35,6 +35,8 @@ import {
   handleSaveInvestigation
 } from '../tools/handlers.js';
 import { handleGenerateHandoffBrief } from '../tools/handoff.js';
+import { saveRefreshToken, loadRefreshToken, deleteRefreshToken } from './refresh-token-store.js';
+import { reportIncident } from '../lib/incident-reporter.js';
 
 export async function startRemoteServer(ctx) {
   // Destructure all server.ts dependencies — same variable names, zero body changes
@@ -199,25 +201,43 @@ export async function startRemoteServer(ctx) {
         signal: AbortSignal.timeout(10000)
       });
       if (resp.ok) return token;
-      // Silent token refresh if 401 and we have a refresh token
-      if (resp.status === 401 && refreshTokenStore[token]?.token) {
-        try {
-          const refreshResp = await fetch(`${API_URL}/api/v1/auth/refresh`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refresh_token: refreshTokenStore[token].token }),
-            signal: AbortSignal.timeout(10000)
-          });
-          if (refreshResp.ok) {
-            const data = await refreshResp.json();
-            const newToken = data.access_token || data.api_key;
-            if (newToken) {
-              if (data.refresh_token) refreshTokenStore[newToken] = { token: data.refresh_token, createdAt: Date.now() };
-              delete refreshTokenStore[token];
-              return newToken;
-            }
+      // Silent token refresh if 401 and we have a refresh token.
+      // Cache MISS in-memory → fall back to durable DB store (survives restarts).
+      if (resp.status === 401) {
+        let refreshToken = refreshTokenStore[token]?.token;
+        if (!refreshToken) {
+          const persisted = await loadRefreshToken(token);
+          if (persisted) {
+            refreshToken = persisted;
+            // Re-hydrate the in-memory cache so subsequent calls are fast.
+            refreshTokenStore[token] = { token: persisted, createdAt: Date.now() };
           }
-        } catch {}
+        }
+        if (refreshToken) {
+          try {
+            const refreshResp = await fetch(`${API_URL}/api/v1/auth/refresh`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refresh_token: refreshToken }),
+              signal: AbortSignal.timeout(10000)
+            });
+            if (refreshResp.ok) {
+              const data = await refreshResp.json();
+              const newToken = data.access_token || data.api_key;
+              if (newToken) {
+                if (data.refresh_token) {
+                  refreshTokenStore[newToken] = { token: data.refresh_token, createdAt: Date.now() };
+                  // Persist alongside the in-memory write so a restart can't lose it.
+                  await saveRefreshToken(newToken, data.refresh_token);
+                }
+                delete refreshTokenStore[token];
+                // Drop the old persisted row too — its token was rotated upstream.
+                await deleteRefreshToken(token);
+                return newToken;
+              }
+            }
+          } catch {}
+        }
       }
       return null;
     } catch { return null; }
@@ -323,21 +343,34 @@ export async function startRemoteServer(ctx) {
       });
 
       if (resp.status === 401) {
-        // Silent token refresh — try refreshing before telling user to reconnect
-        if (refreshTokenStore[apiKey]?.token) {
+        // Silent token refresh — try refreshing before telling user to reconnect.
+        // Cache MISS in-memory → fall back to durable DB store (survives restarts).
+        let refreshTokenForRetry = refreshTokenStore[apiKey]?.token;
+        if (!refreshTokenForRetry) {
+          const persisted = await loadRefreshToken(apiKey);
+          if (persisted) {
+            refreshTokenForRetry = persisted;
+            refreshTokenStore[apiKey] = { token: persisted, createdAt: Date.now() };
+          }
+        }
+        if (refreshTokenForRetry) {
           try {
             const refreshResp = await fetch(`${API_URL}/api/v1/auth/refresh`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ refresh_token: refreshTokenStore[apiKey].token }),
+              body: JSON.stringify({ refresh_token: refreshTokenForRetry }),
               signal: AbortSignal.timeout(10000)
             });
             if (refreshResp.ok) {
               const refreshData = await refreshResp.json();
               const newToken = refreshData.access_token || refreshData.api_key;
               if (newToken) {
-                if (refreshData.refresh_token) refreshTokenStore[newToken] = { token: refreshData.refresh_token, createdAt: Date.now() };
+                if (refreshData.refresh_token) {
+                  refreshTokenStore[newToken] = { token: refreshData.refresh_token, createdAt: Date.now() };
+                  await saveRefreshToken(newToken, refreshData.refresh_token);
+                }
                 delete refreshTokenStore[apiKey];
+                await deleteRefreshToken(apiKey);
                 // Retry the tool call with new token
                 const retryResp = await fetch(`${API_URL}/api/v10/mcp/tools/execute`, {
                   method: 'POST',
@@ -389,6 +422,10 @@ export async function startRemoteServer(ctx) {
         const errText = await resp.text();
         recentErrors.push({ timestamp: new Date().toISOString(), tool: toolName, status: resp.status, error: errText.substring(0, 200) });
         if (recentErrors.length > 100) recentErrors.shift();
+        // Observability stitch (3b): the restart-volatile recentErrors array
+        // hid the get_artifacts 422 bug — errors now ALSO land in the durable
+        // incident hub (source=mcp). Reporter skips 401/403/429 noise itself.
+        reportIncident(`API error ${resp.status}: ${errText.substring(0, 200)}`, { tool: toolName, status: resp.status });
         return { error: `API error ${resp.status}: ${errText.substring(0, 200)}` };
       }
 
@@ -397,6 +434,7 @@ export async function startRemoteServer(ctx) {
     } catch (e) {
       recentErrors.push({ timestamp: new Date().toISOString(), tool: toolName, error: e.message });
       if (recentErrors.length > 100) recentErrors.shift();
+      reportIncident(e.message, { tool: toolName, component: 'tool-execution' });
       return { error: e.name === 'AbortError' ? 'Request timeout' : e.message };
     }
   }
@@ -650,6 +688,7 @@ export async function startRemoteServer(ctx) {
 
     } catch (error) {
       structuredLog.error('Error in /mcp/messages', { error: error.message });
+      reportIncident(error.message, { component: 'mcp-messages-handler' });
       if (!res.headersSent) {
         sendJSON(res, { jsonrpc: '2.0', id: null, error: { code: -32603, message: 'Internal server error' } }, 500);
       }
@@ -1196,8 +1235,12 @@ export async function startRemoteServer(ctx) {
       });
       if (!meResp.ok) return res.status(401).send('Invalid token');
 
-      // Store refresh token
-      if (callbackRefreshToken) refreshTokenStore[token] = { token: callbackRefreshToken, createdAt: Date.now() };
+      // Store refresh token in-memory AND persist so a Render restart can't
+      // wipe the user's silent-refresh path (the whole point of mcp_refresh_tokens).
+      if (callbackRefreshToken) {
+        refreshTokenStore[token] = { token: callbackRefreshToken, createdAt: Date.now() };
+        await saveRefreshToken(token, callbackRefreshToken);
+      }
 
       // Generate MCP authorization code
       const authCode = generateCode();
@@ -1242,7 +1285,10 @@ export async function startRemoteServer(ctx) {
     }
 
     const [apiKey, storedRefreshToken] = result;
-    if (storedRefreshToken) refreshTokenStore[apiKey] = { token: storedRefreshToken, createdAt: Date.now() };
+    if (storedRefreshToken) {
+      refreshTokenStore[apiKey] = { token: storedRefreshToken, createdAt: Date.now() };
+      await saveRefreshToken(apiKey, storedRefreshToken);
+    }
 
     res.json({
       access_token: apiKey,
