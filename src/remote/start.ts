@@ -1266,7 +1266,11 @@ export async function startRemoteServer(ctx) {
   });
 
   // ── OAuth: Token Exchange ──
-  app.post('/oauth/token', (req, res) => {
+  // async: the handler awaits saveRefreshToken. This file is @ts-nocheck, so
+  // the missing `async` was invisible to tsc and shipped as a runtime
+  // SyntaxError that crash-looped the box service (2026-06-13). Verification
+  // for this file = `node --check dist/remote/start.js` after build, not tsc.
+  app.post('/oauth/token', async (req, res) => {
     if (!checkRateLimit(getClientIp(req), 'token', 20)) {
       return res.status(429).json({ error: 'Too many token requests.' });
     }
