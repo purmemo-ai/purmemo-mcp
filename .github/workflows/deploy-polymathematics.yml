@@ -29,3 +29,19 @@ jobs:
           # silently failed every push (see 2026-06-16 fix). The bespoke script
           # mirrors kiru's proven _git pattern and posts ✅/🔴 to Slack itself.
           ssh -i ~/.ssh/id_ed25519 "$POLY_USER@$POLY_HOST" "poly deploy purmemo/mcp"
+
+      # Failure surfacing: the box script posts 🔴 on a deploy/health failure,
+      # but if SSH or the workflow itself fails BEFORE the script runs, nothing
+      # posts. This step fires only on failure and makes a best-effort Slack
+      # alert via the box's own helper, so a CI/SSH-level failure can't hide.
+      # If the box is fully unreachable this also fails — and GitHub's native
+      # failed-workflow notification on main is the backstop for that case.
+      - name: Alert on deploy failure
+        if: failure()
+        continue-on-error: true
+        env:
+          POLY_HOST: ${{ secrets.POLY_HOST }}
+          POLY_USER: ${{ secrets.POLY_USER }}
+        run: |
+          ssh -o ConnectTimeout=10 -i ~/.ssh/id_ed25519 "$POLY_USER@$POLY_HOST" \
+            "/usr/local/bin/poly-slack.sh '🔴 [purmemo-mcp] CI deploy job FAILED before/at the deploy step (run ${{ github.run_id }}, sha ${{ github.sha }}). Check the GitHub Actions log — the box deploy script may not have run.'" || true
