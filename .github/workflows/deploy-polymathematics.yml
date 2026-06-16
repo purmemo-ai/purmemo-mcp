@@ -23,4 +23,9 @@ jobs:
           echo "$POLY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H "$POLY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          ssh -i ~/.ssh/id_ed25519 "$POLY_USER@$POLY_HOST" "/usr/local/bin/poly-deploy.sh purmemo-mcp"
+          # Route through the poly wrapper so the bespoke purmemo-mcp-deploy.sh
+          # is used (run via sudo). The generic poly-deploy.sh ran git AS ubuntu
+          # inside the root-owned releases/ tree, hit "dubious ownership", and
+          # silently failed every push (see 2026-06-16 fix). The bespoke script
+          # mirrors kiru's proven _git pattern and posts ✅/🔴 to Slack itself.
+          ssh -i ~/.ssh/id_ed25519 "$POLY_USER@$POLY_HOST" "poly deploy purmemo/mcp"
