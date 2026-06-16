@@ -176,14 +176,24 @@ export async function startRemoteServer(ctx) {
   const mcpSessions = new Map();
   const SUPPORTED_PROTOCOL_VERSIONS = new Set(['2024-11-05', '2025-11-05', '2025-03-26']);
 
-  // Session cleanup — remove stale sessions every 5 minutes (matches Python)
+  // Session cleanup — remove stale sessions every 5 minutes (matches Python).
+  // A session is reaped only if it is BOTH past maxAge AND has no live SSE
+  // connection. This decouples socket liveness from the activity-based reaper:
+  // a client that holds an open SSE stream is never considered stale, even if
+  // it makes no tool calls. (Fixes the twice-a-day idle-disconnect: the 30s SSE
+  // heartbeat keeps the socket warm but previously never refreshed lastActivity,
+  // so an idle-but-connected client was reaped after 30 min.) maxAge raised from
+  // 30 min to 2 h to match plausible interactive usage; the sseOpen guard is the
+  // real protection.
   const sessionCleanupInterval = setInterval(() => {
-    const maxAge = 30 * 60 * 1000; // 30 minutes
+    const maxAge = 2 * 60 * 60 * 1000; // 2 hours
     const now = Date.now();
     let cleaned = 0;
     for (const [sid, sess] of mcpSessions) {
+      if (sess.sseOpen) continue; // never reap a session with a live SSE stream
       if (now - sess.lastActivity > maxAge) {
         mcpSessions.delete(sid);
+        connMonitor.trackDisconnection(sid); // keep monitor count accurate on reap
         cleaned++;
       }
     }
@@ -490,6 +500,12 @@ export async function startRemoteServer(ctx) {
 
       // ── ping ──
       if (method === 'ping') {
+        // Refresh activity so a client that only pings (no tool calls) isn't
+        // reaped. ping is intentionally unauthenticated, so look up the session
+        // best-effort without requiring auth.
+        const pingSid = req.headers['mcp-session-id'] || req.headers['Mcp-Session-Id'];
+        const pingSess = pingSid && mcpSessions.get(pingSid);
+        if (pingSess) pingSess.lastActivity = Date.now();
         return sendJSON(res, { jsonrpc: '2.0', id: requestId, result: {} });
       }
 
@@ -707,6 +723,9 @@ export async function startRemoteServer(ctx) {
     if (!mcpSessions.has(sessionId)) {
       mcpSessions.set(sessionId, { token: apiKey, createdAt: Date.now(), lastActivity: Date.now() });
     }
+    // Mark the session as holding a live SSE stream so the reaper never evicts
+    // it while connected (see sessionCleanupInterval above).
+    mcpSessions.get(sessionId).sseOpen = true;
 
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -718,11 +737,17 @@ export async function startRemoteServer(ctx) {
 
     const heartbeat = setInterval(() => {
       if (res.writableEnded) { clearInterval(heartbeat); return; }
+      // Refresh activity on every heartbeat: a connected-but-idle client should
+      // never be reaped. This is the core idle-disconnect fix.
+      const sess = mcpSessions.get(sessionId);
+      if (sess) sess.lastActivity = Date.now();
       res.write(`data: ${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/keepalive', params: { timestamp: new Date().toISOString() } })}\n\n`);
     }, 30000);
 
     req.on('close', () => {
       clearInterval(heartbeat);
+      const sess = mcpSessions.get(sessionId);
+      if (sess) sess.sseOpen = false; // socket gone — eligible for normal reaping again
       connMonitor.trackDisconnection(sessionId);
     });
   });
