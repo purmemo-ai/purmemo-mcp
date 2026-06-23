@@ -1304,6 +1304,23 @@ async function tryLocalRecall(query, limit = 5) {
   }
 }
 
+// HD Map: browse/open clusters. No args -> the project/theme hierarchy with counts.
+// cluster="<title or uuid>" -> opens that cluster, listing its member memories.
+export async function handleListClusters(args) {
+  const data = await makeApiCall(`/api/v10/mcp/tools/execute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tool: 'list_clusters',
+      arguments: { cluster: args.cluster }
+    })
+  });
+  if (!data.content || !data.content[0] || !data.content[0].text) {
+    return { content: [{ type: 'text', text: 'No clusters found.' }] };
+  }
+  return { content: [{ type: 'text', text: data.content[0].text }] };
+}
+
 export async function handleRecallMemories(args) {
   const toolName = 'recall_memories';
   const requestId = `${toolName}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
