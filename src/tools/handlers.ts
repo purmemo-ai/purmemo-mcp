@@ -1356,7 +1356,12 @@ export async function handleRecallMemories(args) {
           stakeholder: args.stakeholder,
           deadline: args.deadline,
           intent: args.intent,
-          has_observations: args.has_observations
+          has_observations: args.has_observations,
+          // HD Map Flow 1: cluster-scoped recall ("reverse cluster search"). Forward the
+          // cluster arg so the backend can scope to a cluster's members (by title or UUID).
+          // This handler previously DROPPED it — the backend filter existed but never
+          // received the value, so cluster-scoped recall silently ran unfiltered.
+          cluster: args.cluster
         }
       })
     });

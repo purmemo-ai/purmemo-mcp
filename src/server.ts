@@ -734,6 +734,10 @@ If gate blockers exist (conflicts detected, tier downgrade, or first canonical),
           type: 'string',
           description: 'Filter by initiative/project name from conversation context. Use when user scopes search to specific project or goal. Example: initiative="Q1 OKRs" finds only Q1-related memories. Supports partial matching (ILIKE).'
         },
+        cluster: {
+          type: 'string',
+          description: 'Scope recall to a CLUSTER\'s members ("reverse cluster search"). Accepts a cluster/project title (e.g. cluster="Personal Design Language") or a cluster UUID. A PROJECT name pulls every memory across all its themes; a THEME name pulls that theme. Use when the user asks for "everything about <project/topic>" — it returns the whole cluster, not just the embedding-nearest memories. Case-insensitive for titles.'
+        },
         stakeholder: {
           type: 'string',
           description: "Filter by stakeholder (person or team) from conversation context. Use when user asks about specific person's or team's involvement. Example: stakeholder=\"Engineering Team\" finds memories where Engineering Team was mentioned as stakeholder. Supports partial matching (ILIKE)."
