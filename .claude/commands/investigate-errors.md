@@ -66,9 +66,12 @@ Ask the user: "Should I deploy this fix?"
 ### Step 7: Execute Fix (When Approved)
 1. Use `edit` tool to make code changes
 2. Run tests with `bash pytest` or equivalent
-3. Commit changes: `bash git add . && git commit -m "Fix: <error message> [AI-Investigated]"`
-4. Push to GitHub: `bash git push`
-5. Wait for deployment (Render auto-deploys on push)
+3. Stage ONLY the files you changed, by explicit path — never `git add .` (the working tree may hold unrelated edits):
+   `bash git add <path/to/changed_file> <path/to/other_changed_file>`
+4. Open a **reviewable DRAFT PR** with the ship-fix helper (do NOT push straight to the deploy branch):
+   `bash scripts/ship-fix.sh --incident <incident_id> --summary "<error message>"`
+   This creates a feature branch, commits the staged fix, pushes it, and opens a DRAFT pull request against `main`.
+5. **The fix is NOT deployed yet.** Render auto-deploys `main` only after a human reviews and MERGES the draft PR. Never push to `main` directly and never merge the PR yourself.
 
 ### Step 8: Save Investigation
 Call `save_investigation_result` MCP tool with all investigation details:
@@ -136,9 +139,11 @@ RESULT: Fixed ✓
 **Use a consistent conversationId slug** (e.g. `fix-pattern-jwt-expiredsignatureerror`) so re-runs of the same error *update* the pattern rather than creating duplicates.
 
 ### Step 10: Verify Deployment
-1. Check deployment status on Render
-2. Verify the error is no longer occurring
-3. Report back to user: "Fix deployed and pattern saved to memory!"
+**The fixer never grades its own homework.** Verification that the deployed fix actually worked comes from the probes and the triage brain (independent signal), NOT from this investigation session. The incident is only closed when an independent probe/triage signal confirms the error stopped after the fix merges and deploys.
+
+1. Confirm the draft PR is open and awaiting human review (it is not merged, so nothing is deployed yet).
+2. After a human reviews and merges the PR, Render auto-deploys `main`.
+3. Do NOT self-report "fixed." Report back: "Draft PR opened, awaiting human review; the incident closes only when an independent probe/triage signal confirms the error stopped post-deploy."
 
 ## Important Notes
 
