@@ -22,6 +22,7 @@ import {
   triggerCursorSync,
   getCursorTrayLabel,
 } from './capture/cursor';
+import { reportIncident } from './incident-reporter';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -345,6 +346,15 @@ ipcMain.on('test-context-inject', async () => {
   await triggerContextInject(token, 'Test App');
 });
 
+// Renderer forwards a caught page error to the incident hub (needs keychain,
+// which is main-process only). Fire-and-forget; never throws.
+ipcMain.on('incident:report', (_event, payload: { message?: string; component?: string; route?: string }) => {
+  reportIncident(payload?.message, {
+    component: payload?.component ?? 'renderer',
+    route: payload?.route,
+  });
+});
+
 // Renderer notifies that user saved a memory via clipboard toast
 ipcMain.on('memory-saved', () => {
   if (Notification.isSupported()) {
@@ -400,6 +410,20 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+// ── Crash observability ─────────────────────────────────────────────────────
+// Report normalized signatures of uncaught main-process errors to the incident
+// hub. We only OBSERVE — the errors keep their normal behavior (logged as before).
+process.on('uncaughtException', (err) => {
+  console.error('[purmemo] uncaughtException', err);
+  reportIncident(err?.stack || err?.message || String(err), { component: 'main' });
+});
+
+process.on('unhandledRejection', (reason) => {
+  const r = reason as { stack?: string; message?: string } | undefined;
+  console.error('[purmemo] unhandledRejection', reason);
+  reportIncident(r?.stack || r?.message || String(reason), { component: 'main' });
 });
 
 app.on('before-quit', () => {

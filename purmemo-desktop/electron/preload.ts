@@ -287,5 +287,30 @@ ipcRenderer.on('clipboard-content', (_event, text: string) => {
   }
 });
 
+// ── Renderer crash observability ────────────────────────────────────────────
+// Install global error listeners on the page and forward the message to the
+// main process, which normalizes it and reports to the incident hub with the
+// user's keychain token (renderer has no keychain access). Fire-and-forget.
+function forwardIncident(message: unknown): void {
+  try {
+    ipcRenderer.send('incident:report', {
+      message: String(message),
+      component: 'renderer',
+      route: typeof location !== 'undefined' ? location.pathname : undefined,
+    });
+  } catch {
+    // observability must never break the page
+  }
+}
+
+window.addEventListener('error', (event) => {
+  forwardIncident(event.error?.stack || event.message);
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  const reason = event.reason as { stack?: string; message?: string } | undefined;
+  forwardIncident(reason?.stack || reason?.message || event.reason);
+});
+
 // Log once when preload runs so we can confirm it's active
 console.log('[purmemo] preload loaded, clipboard IPC listener registered');
