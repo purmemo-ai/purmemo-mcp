@@ -66,3 +66,6 @@ scripts/load-env.sh
 NPM Recovery Codes.txt
 *.recovery-codes*
 2fa-backup-codes*.txt
+
+# 44GB media folder — never commit (caused the 90GB git bloat, cleaned 2026-07-16)
+content/
