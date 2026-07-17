@@ -74,6 +74,7 @@ import {
   handleCommit,
   handleSnapshot,
   handleDiscoverRelated,
+  handleListClusters,
   handleRecallMemories,
   handleGetMemoryDetails,
   handleGetUserContext,
@@ -734,6 +735,10 @@ If gate blockers exist (conflicts detected, tier downgrade, or first canonical),
           type: 'string',
           description: 'Filter by initiative/project name from conversation context. Use when user scopes search to specific project or goal. Example: initiative="Q1 OKRs" finds only Q1-related memories. Supports partial matching (ILIKE).'
         },
+        cluster: {
+          type: 'string',
+          description: 'Scope recall to a CLUSTER\'s members ("reverse cluster search"). Accepts a cluster/project title (e.g. cluster="Personal Design Language") or a cluster UUID. A PROJECT name pulls every memory across all its themes; a THEME name pulls that theme. Use when the user asks for "everything about <project/topic>" — it returns the whole cluster, not just the embedding-nearest memories. Case-insensitive for titles.'
+        },
         stakeholder: {
           type: 'string',
           description: "Filter by stakeholder (person or team) from conversation context. Use when user asks about specific person's or team's involvement. Example: stakeholder=\"Engineering Team\" finds memories where Engineering Team was mentioned as stakeholder. Supports partial matching (ILIKE)."
@@ -752,6 +757,26 @@ If gate blockers exist (conflicts detected, tier downgrade, or first canonical),
         }
       },
       required: ['query']
+    }
+  },
+  {
+    name: 'list_clusters',
+    annotations: {
+      title: 'List & Open Clusters',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true
+    },
+    description: `Browse the memory map. With NO arguments, returns the user's PROJECT -> THEME hierarchy with member counts (the "galaxy" as text) — use this to show "what projects/topics do I have?". With cluster="<title or UUID>", OPENS that cluster and lists its member memories (a project title pulls every memory across all its themes; a theme title pulls that theme). Pair with recall_memories(cluster=...) to then semantically search inside a cluster. Read-only.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cluster: {
+          type: 'string',
+          description: 'Optional. A cluster/project/theme TITLE (case-insensitive) or a cluster UUID to OPEN — lists that cluster\'s memories. Omit to LIST all projects and themes with counts.'
+        }
+      },
+      required: []
     }
   },
   {
@@ -1764,6 +1789,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return withUpdateNotice(await handleGetMemoryDetails(args));
     case 'discover_related_conversations':
       return withUpdateNotice(await handleDiscoverRelated(args));
+    case 'list_clusters':
+      return withUpdateNotice(await handleListClusters(args));
     case 'get_user_context':
       return withUpdateNotice(await handleGetUserContext(args));
     case 'run_workflow':
