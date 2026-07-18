@@ -277,7 +277,7 @@ async function main(): Promise<void> {
   // session — caching would lie to users about quota state and capture
   // counts. Parallel with memory fetch means ~0ms added wall-clock cost.
   const params = new URLSearchParams({
-    limit: String(MAX_MEMORIES),
+    limit: String(MAX_MEMORIES * 3), // headroom: one-shot captures are filtered out below
     sort: 'user_updated_at',
     order: 'desc',
   });
@@ -286,7 +286,26 @@ async function main(): Promise<void> {
     apiGet(apiKey, `/api/v1/todos?limit=${MAX_TODOS}`).catch(() => null),
     getAccountSnapshot(apiKey),
   ]);
-  const memories = (memResult as { memories?: Array<Record<string, unknown>> })?.memories || [];
+  const allMemories = (memResult as { memories?: Array<Record<string, unknown>> })?.memories || [];
+  // The brief's LIST shows the last MAX_MEMORIES saves from ANY source (iOS
+  // share, web clipper, phone, CLI) — that is the hook's whole point. Only the
+  // "Last session:" slot (memories[0]) must be conversation-derived, so a
+  // one-shot capture can't masquerade as the last working session (an iOS-shared
+  // AI-news item once claimed the line; the first fix filtered ALL slots and hid
+  // one-shot saves entirely — corrected 2026-07-18). Conversation memories carry
+  // a conversation_id (or session_id); one-shot captures don't.
+  const isConversationMemory = (m: Record<string, unknown>) => Boolean(m.conversation_id || m.session_id);
+  let memories = allMemories.slice(0, MAX_MEMORIES);
+  const primaryIdx = memories.findIndex(isConversationMemory);
+  if (primaryIdx > 0) {
+    memories.unshift(memories.splice(primaryIdx, 1)[0]);
+  } else if (primaryIdx === -1) {
+    // No conversation memory in the top window — pull the newest one from the
+    // 3× headroom fetch so "Last session:" still names a real session, then
+    // keep the rest of the list as the true latest saves.
+    const conv = allMemories.find(isConversationMemory);
+    if (conv) memories = [conv, ...memories].slice(0, MAX_MEMORIES);
+  }
   const todos = (Array.isArray(todosResult) ? todosResult : (todosResult as { todos?: Array<Record<string, unknown>> })?.todos) || [];
   dbg(TAG, `recalled ${memories.length} memories, ${todos.length} todos, account=${account?.tier ?? 'unknown'}`);
 

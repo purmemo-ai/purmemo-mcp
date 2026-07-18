@@ -25,22 +25,32 @@ function countUserMessages(transcriptPath: string): number {
     if (!raw) return 0;
 
     // Gemini JSON format: { messages: [{ type: "user" | "gemini" }] }
+    // Claude JSONL lines ALSO start with '{', so a whole-file JSON.parse
+    // throws on line 2 — that must fall through to the per-line JSONL
+    // parser below, not return 0 (the old sniffing bug counted every
+    // Claude transcript as having zero user messages).
     if (raw.startsWith('{') || raw.startsWith('[')) {
       try {
         const data = JSON.parse(raw);
         const msgs = data.messages || data.turns || [];
-        return msgs.filter((m: Record<string, unknown>) =>
-          m.type === 'user' || m.role === 'user' || m.role === 'human'
-        ).length;
-      } catch { return 0; }
+        if (Array.isArray(msgs) && msgs.length) {
+          return msgs.filter((m: Record<string, unknown>) =>
+            m.type === 'user' || m.role === 'user' || m.role === 'human'
+          ).length;
+        }
+      } catch { /* not a single-doc transcript — fall through to JSONL */ }
     }
 
-    // Claude JSONL format
+    // Claude JSONL format — count only real user prompts, not tool_result
+    // turns (those also arrive as type "user" with array content).
     let count = 0;
     for (const line of raw.split('\n').filter(Boolean)) {
       try {
         const entry = JSON.parse(line);
-        if (entry.type === 'user') count++;
+        if (entry.type !== 'user') continue;
+        const content = entry.message?.content;
+        if (typeof content === 'string') { count++; continue; }
+        if (Array.isArray(content) && content.some((b: Record<string, unknown>) => b?.type === 'text')) count++;
       } catch {}
     }
     return count;
