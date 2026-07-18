@@ -1,0 +1,39 @@
+name: Promote dist-tag
+
+# Move an npm dist-tag (e.g. bless a version as "stable") from CI, using the
+# same NPM_TOKEN the publish job uses — no interactive OTP. Trigger via:
+#   gh workflow run dist-tag.yml -f version=15.7.24 -f tag=stable
+#
+# npm policy horizon (verified 2026-07-18): 2FA-bypass granular tokens lose
+# package-management actions ~Aug 2026 and direct publishing ~Jan 2027. If
+# this job starts failing with EOTP, switch to choosing the channel at
+# publish time (npm publish --tag) instead of post-hoc tag moves.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to point the tag at (e.g. 15.7.24)"
+        required: true
+      tag:
+        description: "The dist-tag to move"
+        required: true
+        default: "stable"
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Move tag
+        run: |
+          npm dist-tag add "purmemo-mcp@${{ inputs.version }}" "${{ inputs.tag }}"
+          echo "--- resulting tags ---"
+          npm dist-tag ls purmemo-mcp
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
