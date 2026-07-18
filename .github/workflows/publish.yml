@@ -45,11 +45,9 @@ jobs:
           asset_name: purmemo-mcp.mcpb
           asset_content_type: application/octet-stream
 
-      - name: Trigger Remote MCP redeploy
-        run: |
-          curl -s -X POST "https://api.render.com/v1/services/${{ secrets.RENDER_MCP_SERVICE_ID }}/deploys" \
-            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d '{"clearCache": "do_not_clear"}' \
-            && echo "✅ Remote MCP redeploy triggered" \
-            || echo "⚠️ Remote MCP redeploy failed (non-blocking)"
+      # Remote MCP redeploy: NOT here. The remote endpoint (mcp.purmemo.ai)
+      # lives on the polymathematics OCI VM and auto-deploys on every push to
+      # main via deploy-polymathematics.yml — the version-bump push that
+      # precedes a release has already triggered it. The old Render service
+      # (purmemo-mcp.onrender.com) was suspended by Chris 2026-06-18; the curl
+      # step that redeployed it was removed 2026-07-18.
