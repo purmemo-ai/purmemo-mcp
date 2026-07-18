@@ -6,7 +6,7 @@
     "url": "https://github.com/purmemo-ai/purmemo-mcp",
     "source": "github"
   },
-  "version": "15.7.23",
+  "version": "15.7.24",
   "icon": {
     "src": "https://purmemo.ai/favicon.png"
   },
@@ -37,6 +37,9 @@
     },
     {
       "name": "recall_memories"
+    },
+    {
+      "name": "list_clusters"
     },
     {
       "name": "get_memory_details"
@@ -78,6 +81,15 @@
       "name": "save_test_result"
     },
     {
+      "name": "get_test_results"
+    },
+    {
+      "name": "get_artifacts"
+    },
+    {
+      "name": "get_investigations"
+    },
+    {
       "name": "get_next_task"
     },
     {
@@ -88,7 +100,7 @@
     {
       "registryType": "npm",
       "identifier": "purmemo-mcp",
-      "version": "15.7.23",
+      "version": "15.7.24",
       "runtimeHint": "node",
       "transport": {
         "type": "stdio"
