@@ -65,17 +65,68 @@ function shadowLog(line: string) {
   }
 }
 
+// Stable per-memory identity for the shadow door ("source_key").
+//
+// Contract:
+//   - Single saves  -> result.memoryId   (upserts on conversation_id, stable across re-saves)
+//   - Chunked saves -> result.indexId    (the PARENT memory; its conversation_id is the
+//                      deterministic "<session>:index" so it upserts too). Part ids are
+//                      NEVER used: chunk boundaries shift as content grows, so a part id
+//                      would falsely read as a brand new source on every re-save. One
+//                      memory must never appear as N sources.
+//   - Anything else -> null, and the door does NOT fire. A shadow row with no key is
+//                      worse than no row: it is invisible to the supersession check and
+//                      inflates the "no source key" count forever.
+//
+// Both call sites invoke this AFTER the awaited cloud save resolves, so the live id
+// already exists — a new save can never send null because it has an id by then.
+//
+// TEST SEAM: overridable so the throw-injection test can prove that a derivation
+// failure cannot break the live save path.
+let deriveSourceKeyImpl = (result: any): string | null => {
+  if (!result) return null;
+  const key = result.memoryId || result.indexId;
+  return typeof key === 'string' && key.length > 0 ? key : null;
+};
+
+export function __setDeriveSourceKeyForTest(fn: ((result: any) => string | null) | null): void {
+  deriveSourceKeyImpl = fn || ((result: any) => {
+    if (!result) return null;
+    const key = result.memoryId || result.indexId;
+    return typeof key === 'string' && key.length > 0 ? key : null;
+  });
+}
+
+// Wrapped derivation. A throw inside deriveSourceKeyImpl is caught here and
+// degrades to "no key" — it can NEVER propagate into the live save handler.
+function deriveSourceKey(result: any): string | null {
+  try {
+    return deriveSourceKeyImpl(result);
+  } catch (err: any) {
+    shadowLog(`shadow source-key derive-fail ${(err && err.message) || String(err)}`);
+    return null;
+  }
+}
+
 // Fire-and-forget. Returns immediately; the caller MUST NOT await the returned
-// promise into the user response path. Everything — including body build — is
-// wrapped so it can never throw into the save handler.
-function fireShadowDoor(content: string): void {
+// promise into the user response path. Everything — including source-key
+// derivation and body build — is wrapped so it can never throw into the save
+// handler.
+function fireShadowDoor(content: string, saveResult?: any): void {
   try {
     const url = process.env.PURMEMO_SHADOW_DOOR_URL;
     const token = process.env.PURMEMO_SHADOW_DOOR_TOKEN;
     if (!url || !token) return; // flag off → exact current behavior, no-op.
 
+    const sourceKey = deriveSourceKey(saveResult);
+    if (!sourceKey) {
+      // Loud, but still non-fatal. Never send a keyless row.
+      shadowLog('shadow skip no-source-key');
+      return;
+    }
+
     const userId = (process.env.PURMEMO_SHADOW_USER_ID || 'chris').trim() || 'chris';
-    const body = JSON.stringify({ content, source: 'mcp-shadow', user_id: userId });
+    const body = JSON.stringify({ content, source: 'mcp-shadow', user_id: userId, source_key: sourceKey });
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000); // 5s socket timeout.
@@ -607,7 +658,8 @@ export async function handleSaveConversation(args) {
 
       // Shadow-mirror the successful cloud save into the rebuilt engine.
       // Fire-and-forget: NOT awaited, cannot throw, no-op when flag unset.
-      fireShadowDoor(content);
+      // source_key = the PARENT (index) memory id, never a part id.
+      fireShadowDoor(content, result);
 
       structuredLog.info(`${toolName}: completed`, {
         tool_name: toolName,
@@ -647,7 +699,8 @@ export async function handleSaveConversation(args) {
 
       // Shadow-mirror the successful cloud save into the rebuilt engine.
       // Fire-and-forget: NOT awaited, cannot throw, no-op when flag unset.
-      fireShadowDoor(content);
+      // source_key = the live memory id (same id on create and on update).
+      fireShadowDoor(content, result);
 
       structuredLog.info(`${toolName}: completed`, {
         tool_name: toolName,
