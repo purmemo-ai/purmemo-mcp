@@ -158,6 +158,53 @@ function fireShadowDoor(content: string, saveResult?: any): void {
   }
 }
 
+// Fire-and-forget recall mirror — the read-side twin of fireShadowDoor.
+//
+// Mirrors every recall QUERY to the rebuilt engine's /recall endpoint so the
+// rebuild's recall_log accumulates the real usage signal (which questions get
+// asked, what its index returns for them). The rebuild logs server-side; this
+// client ignores the response body entirely. Same guarantees as the save
+// mirror: not awaited into the user path, 5s abort, every failure — including
+// synchronous construction errors — degrades to a local log line and nothing
+// else. The live recall result is NEVER affected.
+function fireShadowRecall(query: string, limit: number): void {
+  try {
+    const url = process.env.PURMEMO_SHADOW_DOOR_URL;
+    const token = process.env.PURMEMO_SHADOW_DOOR_TOKEN;
+    if (!url || !token) return; // flag off → exact current behavior, no-op.
+    if (!query || typeof query !== 'string') return; // nothing meaningful to mirror.
+
+    // The env URL points at .../door/save; /recall is its sibling route.
+    const recallUrl = `${url.replace(/\/save$/, '')}/recall`;
+    const body = JSON.stringify({ query, limit: Number.isFinite(limit) && limit > 0 ? limit : 10 });
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000); // 5s socket timeout.
+
+    fetch(recallUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body,
+      signal: controller.signal,
+    })
+      .then((resp) => {
+        clearTimeout(timer);
+        if (!resp || !resp.ok) {
+          shadowLog(`shadow-recall non-ok status=${resp ? resp.status : 'none'}`);
+        }
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        shadowLog(`shadow-recall error ${err && err.name === 'AbortError' ? 'timeout' : (err && err.message) || String(err)}`);
+      });
+  } catch (err: any) {
+    shadowLog(`shadow-recall sync-fail ${(err && err.message) || String(err)}`);
+  }
+}
+
 // ============================================================================
 // Content helpers
 // ============================================================================
@@ -1458,6 +1505,11 @@ export async function handleRecallMemories(args) {
 
   try {
     const safeQuery = sanitizeUnicode(args.query || '');
+
+    // Shadow-line: mirror the query to the rebuilt engine so its recall_log
+    // accumulates real usage signal. Fire-and-forget — never awaited, never
+    // affects the live recall below.
+    fireShadowRecall(safeQuery, parseInt(args.limit) || 10);
 
     // ── Local-first: try purmemoAMP before cloud ──
     const localResults = await tryLocalRecall(safeQuery, parseInt(args.limit) || 10);
