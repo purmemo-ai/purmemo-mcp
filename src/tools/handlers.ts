@@ -28,6 +28,12 @@ import {
 let PLATFORM = 'claude';
 let readCurrentSessionId: () => string | null = () => null;
 
+// Every memory written through this MCP server is stamped with its capture
+// path. Without this the API's createSchema defaults source_type to 'manual',
+// which made MCP traffic — the largest capture surface — indistinguishable
+// from hand-pasted saves and broke any "where did this come from?" analysis.
+const SOURCE_TYPE = 'mcp';
+
 export function initHandlers(deps: {
   platform: string;
   getLastRecallIds: () => string[];
@@ -348,6 +354,7 @@ async function saveChunkedContent(content, title, tags = [], metadata = {}) {
         title: `${title} - Part ${partNumber}/${totalParts}`,
         tags: [...tags, 'chunked-conversation', `session:${sessionId}`],
         platform: PLATFORM,
+        source_type: SOURCE_TYPE,
         conversation_id: `${sessionId}:part:${partNumber}`,
         mode,
         metadata: {
@@ -388,6 +395,7 @@ async function saveChunkedContent(content, title, tags = [], metadata = {}) {
       title: `${title} - Index`,
       tags: [...tags, 'chunked-index', `session:${sessionId}`],
       platform: PLATFORM,
+      source_type: SOURCE_TYPE,
       conversation_id: `${sessionId}:index`,
       // Index is a synthesized summary regenerated each save — always replace.
       mode: 'replace',
@@ -437,6 +445,7 @@ async function saveSingleContent(content, title, tags = [], metadata = {}) {
     title,
     tags: [...tags, 'complete-conversation'],
     platform: PLATFORM,
+    source_type: SOURCE_TYPE,
     conversation_id: metadata.conversationId || null,
     mode: metadata._mode || 'replace',
     metadata: {
@@ -869,6 +878,7 @@ export async function handleSaveArtifact(args) {
       title,
       tags,
       platform: PLATFORM,
+      source_type: SOURCE_TYPE,
       conversation_id: artifactConversationId,
       artifact_type: artifactType,
       parent_conversation_id: parentConversationId,
@@ -989,6 +999,7 @@ export async function handleCommit(args) {
       content,
       tags,
       platform: PLATFORM,
+      source_type: SOURCE_TYPE,
       commitment_type: commitmentType,
       ...(keyResult && { key_result: keyResult }),
       ...(targetDate && { target_date: targetDate }),
