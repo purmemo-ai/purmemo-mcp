@@ -123,6 +123,13 @@ function fireShadowDoor(content: string, saveResult?: any): void {
     const url = process.env.PURMEMO_SHADOW_DOOR_URL;
     const token = process.env.PURMEMO_SHADOW_DOOR_TOKEN;
     if (!url || !token) return; // flag off → exact current behavior, no-op.
+    // 2026-09-07 (purmemo-next plan step E): the SAVE mirror now lives
+    // server-side in purmemo-api (services/shadow.ts), which sees every capture
+    // surface with the authenticated user. When the operator sets
+    // PURMEMO_SHADOW_SAVE_DISABLED=1 this client-side save mirror retires so a
+    // save is not mirrored twice. The RECALL mirror below (fireShadowRecall)
+    // is unaffected — it still needs the URL/token. No-op for everyone else.
+    if (process.env.PURMEMO_SHADOW_SAVE_DISABLED === '1') return;
 
     const sourceKey = deriveSourceKey(saveResult);
     if (!sourceKey) {
