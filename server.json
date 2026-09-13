@@ -6,7 +6,7 @@
     "url": "https://github.com/purmemo-ai/purmemo-mcp",
     "source": "github"
   },
-  "version": "15.7.26",
+  "version": "15.7.27",
   "icon": {
     "src": "https://purmemo.ai/favicon.png"
   },
@@ -37,6 +37,9 @@
     },
     {
       "name": "recall_memories"
+    },
+    {
+      "name": "what_changed"
     },
     {
       "name": "list_clusters"
@@ -100,7 +103,7 @@
     {
       "registryType": "npm",
       "identifier": "purmemo-mcp",
-      "version": "15.7.26",
+      "version": "15.7.27",
       "runtimeHint": "node",
       "transport": {
         "type": "stdio"

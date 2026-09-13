@@ -15,6 +15,7 @@ import {
   handleCommit,
   handleSnapshot,
   handleGetUserContext,
+  handleWhatChanged,
   handleRunWorkflow,
   handleListWorkflows,
   handleShareMemory,
@@ -301,6 +302,7 @@ export async function startRemoteServer(ctx) {
 
     // Tools that MUST be handled locally (not available on backend)
     const localOnlyHandlers = {
+      'what_changed': handleWhatChanged,
       'get_user_context': handleGetUserContext,
       'run_workflow': handleRunWorkflow,
       'list_workflows': handleListWorkflows,

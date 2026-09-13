@@ -8,7 +8,7 @@
 
 import { appendFileSync } from 'node:fs';
 import { structuredLog } from '../lib/logger.js';
-import { makeApiCall, sanitizeUnicode, safeErrorMessage, wafSafeBody } from '../lib/api-client.js';
+import { makeApiCall, sanitizeUnicode, safeErrorMessage, wafSafeBody, getEffectiveApiKey } from '../lib/api-client.js';
 import {
   extractProjectContext,
   generateIntelligentTitle,
@@ -2936,5 +2936,88 @@ export async function handleSaveInvestigation(args) {
         text: `❌ Error saving investigation: ${userMessage}\n\nPlease check:\n1. incident_id is valid (from get_acknowledged_errors)\n2. Backend API is running\n3. You have admin permissions`
       }]
     };
+  }
+}
+
+
+// ─── what_changed — the first purmemo-next-only capability (2026-09-12) ─────────
+// Live purmemo can search; only the rebuild's claim ledger knows WHEN a fact
+// became true, when it stopped, and what replaced it. This tool reads that
+// history from purmemo-next's dossier endpoint with the caller's own live
+// credential (next resolves it via live's /auth/me). purmemo-next lives on the
+// same box as the public gateway, so the default is localhost; the shadow env
+// (local sessions) or PURMEMO_NEXT_URL override it.
+function nextBaseUrl(): string {
+  const explicit = (process.env.PURMEMO_NEXT_URL || '').trim();
+  if (explicit) return explicit.replace(/\/+$/, '');
+  const shadow = (process.env.PURMEMO_SHADOW_DOOR_URL || '').trim();
+  const m = /^(https?:\/\/[^/]+)/.exec(shadow);
+  if (m) return m[1];
+  return 'http://127.0.0.1:3210';
+}
+
+const fmtDay = (v: unknown) => (v ? String(v).slice(0, 10) : '?');
+
+/** Pure formatter, tested in isolation. */
+export function formatWhatChanged(hit: any, dossier: any, limit = 10): string {
+  const name = dossier?.entity?.canonical_name || hit?.canonical_name || 'this entity';
+  const aka = (dossier?.members || []).map((m: any) => m.canonical_name).filter((n: string) => n !== name);
+  const lines: string[] = [];
+  lines.push(`🕰️ What changed about **${name}**${aka.length ? ` (also: ${aka.slice(0, 5).join(', ')})` : ''}`);
+  lines.push(`Current facts: ${dossier?.claim_count ?? 0} · superseded: ${dossier?.history_count ?? 0} · open contradictions: ${dossier?.contradiction_count ?? 0}`);
+  // Collapse near-duplicate rows (the ledger's near-duplicate propagation can retire
+  // several phrasings of one fact with the same replacement) so each change reads once.
+  const seen = new Set<string>();
+  const allHist = (dossier?.history || []).filter((h: any) => {
+    const sig = `${fmtDay(h.valid_to)}|${String(h.statement || '').slice(0, 100)}|${String(h.replaced_by || '').slice(0, 100)}`;
+    if (seen.has(sig)) return false;
+    seen.add(sig); return true;
+  });
+  const hist = allHist.slice(0, limit);
+  if (!hist.length) {
+    lines.push('', 'No superseded facts on record yet — everything the ledger holds about this is still current.');
+  } else {
+    lines.push('', 'Changes (newest first):');
+    for (const h of hist) {
+      const key = h.temporal_key ? ` [${h.temporal_key}]` : '';
+      lines.push(`• ${fmtDay(h.valid_to)}${key}: ${String(h.statement || '').trim()}`);
+      if (h.replaced_by) lines.push(`    → now: ${String(h.replaced_by).trim()}`);
+    }
+    if (allHist.length > hist.length) lines.push(`  … ${allHist.length - hist.length} older change(s) not shown (raise limit).`);
+  }
+  const contra = (dossier?.contradictions || []).slice(0, 5);
+  if (contra.length) {
+    lines.push('', 'Open contradictions (both still current — same date, no winner):');
+    for (const c of contra) lines.push(`• "${String(c.claim_a || '').slice(0, 120)}"  vs  "${String(c.claim_b || '').slice(0, 120)}"`);
+  }
+  if (dossier?.entity?.id) lines.push('', `entity id: ${dossier.entity.id} (served by purmemo-next)`);
+  return lines.join('\n');
+}
+
+export async function handleWhatChanged(args: any) {
+  const entity = typeof args?.entity === 'string' ? args.entity.trim() : '';
+  const limit = Math.min(50, Math.max(1, parseInt(String(args?.limit ?? '10'), 10) || 10));
+  if (!entity) return { content: [{ type: 'text', text: '❌ what_changed needs an entity name, e.g. what_changed({ entity: "purmemo-next" })' }], isError: true };
+  const key = getEffectiveApiKey();
+  if (!key) return { content: [{ type: 'text', text: '❌ No purmemo credential configured (run `npx purmemo-mcp setup`).' }], isError: true };
+  const base = nextBaseUrl();
+  const headers = { Authorization: `Bearer ${key}` };
+  structuredLog.info('what_changed: called', { entity, base });
+  try {
+    const r1 = await fetch(`${base}/api/v1/entities?q=${encodeURIComponent(entity)}`, { headers, signal: AbortSignal.timeout(20000) });
+    if (!r1.ok) throw new Error(`entities lookup HTTP ${r1.status}`);
+    const found = await r1.json();
+    const hits = found?.entities || [];
+    if (!hits.length) return { content: [{ type: 'text', text: `No entity matching "${entity}" in your ledger yet.` }] };
+    const hit = hits[0];
+    const r2 = await fetch(`${base}/api/v1/entities/${hit.id}/dossier`, { headers, signal: AbortSignal.timeout(20000) });
+    if (!r2.ok) throw new Error(`dossier HTTP ${r2.status}`);
+    const dossier = await r2.json();
+    let text = formatWhatChanged(hit, dossier, limit);
+    if (hits.length > 1) text += `\n\nOther matches: ${hits.slice(1, 5).map((h: any) => `${h.canonical_name} (${h.current_claims} facts)`).join(', ')}`;
+    return { content: [{ type: 'text', text }] };
+  } catch (err: any) {
+    structuredLog.warn('what_changed: failed', { error_message: String(err?.message || err) });
+    return { content: [{ type: 'text', text: `⚠️ what_changed is unavailable right now (${safeErrorMessage(err)}). The rest of purmemo is unaffected.` }], isError: true };
   }
 }

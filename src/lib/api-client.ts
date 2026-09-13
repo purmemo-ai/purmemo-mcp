@@ -233,6 +233,11 @@ export function wafSafeBody(payload: Record<string, unknown>): string {
 
 // SECURITY: apiKeyOverride allows per-request API key (concurrency-safe)
 // instead of mutating a global resolvedApiKey
+/** The credential makeApiCall would use right now (per-request key → resolved key). Used for purmemo-next calls, which accept the same live credential. */
+export function getEffectiveApiKey(apiKeyOverride = null) {
+  return apiKeyOverride || _requestKeyStore.getStore() || _resolveApiKey();
+}
+
 export async function makeApiCall(endpoint, options = {}, apiKeyOverride = null) {
   const method = options.method || 'GET';
   const requestId = `api_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;

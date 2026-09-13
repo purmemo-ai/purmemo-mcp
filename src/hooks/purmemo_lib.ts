@@ -172,13 +172,19 @@ export function readState(): Record<string, unknown> {
 }
 
 export function writeState(state: Record<string, unknown>): void {
+  // Unique tmp name per writer: multiple hooks (recall, first_message,
+  // intelligence) run concurrently across sessions. A shared ".tmp" path
+  // raced — writer B's rename hit ENOENT after writer A renamed the shared
+  // tmp away, silently dropping B's state update (seen daily in
+  // purmemo_debug.log). rename() itself stays atomic; last writer wins.
+  const tmp = `${_paths.stateFile}.tmp.${process.pid}.${Math.random().toString(36).slice(2, 8)}`;
   try {
     const dir = path.dirname(_paths.stateFile);
     fs.mkdirSync(dir, { recursive: true });
-    const tmp = _paths.stateFile + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(state), 'utf8');
     fs.renameSync(tmp, _paths.stateFile);
   } catch (e: unknown) {
+    try { fs.unlinkSync(tmp); } catch { /* already renamed or never written */ }
     errLog('state', `write failed: ${(e as Error).message}`);
   }
 }

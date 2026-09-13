@@ -67,6 +67,7 @@ This clears any stale credentials and signs you back in. (Fixed in v15.7.20+ —
 
 - **Remembers everything** — save any conversation, recall it later by typing what you remember about it.
 - **Knows who you are** — your role, your projects, your stack — loaded automatically into every new session.
+- **Tells you what changed** — ask `what_changed` about a person, project, or thing and get its dated history: what used to be true, what replaced it, and when.
 - **Works everywhere** — Claude Code, Claude Desktop, Cursor, Windsurf, Zed, anything that speaks MCP.
 
 Three slash commands you'll use most:

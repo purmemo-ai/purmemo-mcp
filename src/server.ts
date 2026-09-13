@@ -75,6 +75,7 @@ import {
   handleSnapshot,
   handleDiscoverRelated,
   handleListClusters,
+  handleWhatChanged,
   handleRecallMemories,
   handleGetMemoryDetails,
   handleGetUserContext,
@@ -757,6 +758,32 @@ If gate blockers exist (conflicts detected, tier downgrade, or first canonical),
         }
       },
       required: ['query']
+    }
+  },
+  {
+    name: 'what_changed',
+    annotations: {
+      title: 'What Changed',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true
+    },
+    description: `TIMELINE OF A THING: what facts about an entity (a project, machine, person, product) were TRUE and then REPLACED by newer facts, with dates — plus any open contradictions. Served by the purmemo-next ledger, which knows when a fact became true and when it stopped; plain search cannot answer this.
+
+WHEN TO USE: "what changed about X", "what used to be true about X", "when did X move/switch/get renamed", "is this fact still current", or before relying on an older memory about X.
+
+EXAMPLES:
+  what_changed({ entity: "purmemo-next" }) → e.g. "2026-08-10 [hosting]: database stayed on Supabase → now: migrated to the Mac mini"
+  what_changed({ entity: "clo-mini", limit: 20 })
+
+Returns: current-fact count, superseded facts newest-first with what replaced each, open contradictions, and the entity id. Read-only.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entity: { type: 'string', description: 'The thing to look up by name (any spelling the ledger knows: "purmemo-next", "Mac mini", "pūremail").' },
+        limit: { type: 'integer', description: 'Max superseded facts to show (default 10, max 50).' }
+      },
+      required: ['entity']
     }
   },
   {
@@ -1791,6 +1818,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return withUpdateNotice(await handleDiscoverRelated(args));
     case 'list_clusters':
       return withUpdateNotice(await handleListClusters(args));
+    case 'what_changed':
+      return withUpdateNotice(await handleWhatChanged(args));
     case 'get_user_context':
       return withUpdateNotice(await handleGetUserContext(args));
     case 'run_workflow':
