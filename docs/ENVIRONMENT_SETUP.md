@@ -95,8 +95,11 @@ npm start
 3. Regenerate at https://www.npmjs.com/settings/tokens
 
 ### GitHub Actions publish fails
-1. Verify secret is set: `gh secret list -R coladapo/purmemo-mcp`
-2. Update secret: `echo "YOUR_TOKEN" | gh secret set NPM_TOKEN -R coladapo/purmemo-mcp`
+A `404 Not Found - PUT https://registry.npmjs.org/purmemo-mcp` on publish means the token was rejected (npm hides auth failures as 404). Granular tokens live at most 90 days.
+1. Verify secret is set: `gh secret list -R purmemo-ai/purmemo-mcp` (the date shown is when it was set; +90 days is the latest it can still work)
+2. Preferred fix (no more expiry): on npmjs.com → package purmemo-mcp → Settings → Trusted Publisher → GitHub Actions, org `purmemo-ai`, repo `purmemo-mcp`, workflow `publish.yml`. Then delete the `NPM_TOKEN` secret; the workflow already upgrades npm and publishes with `--provenance` via OIDC.
+3. Token fix (recurs every 90 days): mint a granular token with publish rights + bypass 2FA, then `echo "YOUR_TOKEN" | gh secret set NPM_TOKEN -R purmemo-ai/purmemo-mcp`
+4. Re-run the failed publish job: `gh run rerun <run-id> -R purmemo-ai/purmemo-mcp` (the .mcpb upload rides on the same job)
 
 ### MCP server can't connect to API
 1. Check `PURMEMO_API_KEY` is set

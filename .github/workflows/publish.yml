@@ -23,6 +23,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # npm >= 11.5.1 can publish via GitHub OIDC ("trusted publishing") with no
+      # token at all. Node 20 ships npm 10, so upgrade first. If NPM_TOKEN is set
+      # it is still used (granular tokens expire after at most 90 days — the
+      # 2026-09-13 release failed with a 404-on-PUT because the 2026-05-21 token
+      # had expired). Once the package's Trusted Publisher is configured on
+      # npmjs.com for this repo + workflow, delete the NPM_TOKEN secret and the
+      # publish runs token-free forever.
+      - name: Upgrade npm (OIDC trusted publishing needs >= 11.5.1)
+        run: npm install -g npm@latest && npm --version
+
       - name: Publish to npm
         run: npm publish --provenance --access public
         env:
