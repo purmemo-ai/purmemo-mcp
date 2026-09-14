@@ -23,20 +23,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # npm >= 11.5.1 can publish via GitHub OIDC ("trusted publishing") with no
-      # token at all. Node 20 ships npm 10, so upgrade first. If NPM_TOKEN is set
-      # it is still used (granular tokens expire after at most 90 days — the
-      # 2026-09-13 release failed with a 404-on-PUT because the 2026-05-21 token
-      # had expired). Once the package's Trusted Publisher is configured on
-      # npmjs.com for this repo + workflow, delete the NPM_TOKEN secret and the
-      # publish runs token-free forever.
-      - name: Upgrade npm (OIDC trusted publishing needs >= 11.5.1)
+      # Token-free publish via npm Trusted Publishing (GitHub OIDC), chosen by
+      # Chris 2026-09-13 after the NPM_TOKEN granular token silently expired
+      # (npm caps them at 90 days; the 2026-05-21 token died ~08-19 and the
+      # v15.7.27 publish failed with a 404-on-PUT). Requirements: the package's
+      # Trusted Publisher on npmjs.com = GitHub Actions, org purmemo-ai, repo
+      # purmemo-mcp, workflow publish.yml; `id-token: write` above; npm >= 11.5.1
+      # (node 20 ships npm 10, hence the upgrade). No NPM_TOKEN secret anywhere.
+      - name: Upgrade npm (trusted publishing needs >= 11.5.1)
         run: npm install -g npm@latest && npm --version
 
-      - name: Publish to npm
+      - name: Publish to npm (trusted publishing, no token)
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Build .mcpb bundle (with dependencies)
         run: |

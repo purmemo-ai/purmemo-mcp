@@ -17,10 +17,7 @@
 ## Available Tokens
 
 ### NPM Publishing
-- **`NPM_TOKEN`** - Primary granular token (expires March 10, 2026)
-  - Used for automated npm publishing
-  - Required for: `npm publish`, GitHub Actions
-  - Get from: https://www.npmjs.com/settings/YOUR_USERNAME/tokens
+- **`NPM_TOKEN`** - RETIRED 2026-09-13. CI publishes via npm Trusted Publishing (GitHub OIDC); no token exists or is needed. A local `npm publish` is not part of the release process (use `gh release create`).
 
 - **`NPM_TOKEN_LEGACY`** - Classic token (expires February 23, 2026)
   - Used for legacy compatibility
@@ -97,9 +94,8 @@ npm start
 ### GitHub Actions publish fails
 A `404 Not Found - PUT https://registry.npmjs.org/purmemo-mcp` on publish means the token was rejected (npm hides auth failures as 404). Granular tokens live at most 90 days.
 1. Verify secret is set: `gh secret list -R purmemo-ai/purmemo-mcp` (the date shown is when it was set; +90 days is the latest it can still work)
-2. Preferred fix (no more expiry): on npmjs.com → package purmemo-mcp → Settings → Trusted Publisher → GitHub Actions, org `purmemo-ai`, repo `purmemo-mcp`, workflow `publish.yml`. Then delete the `NPM_TOKEN` secret; the workflow already upgrades npm and publishes with `--provenance` via OIDC.
-3. Token fix (recurs every 90 days): mint a granular token with publish rights + bypass 2FA, then `echo "YOUR_TOKEN" | gh secret set NPM_TOKEN -R purmemo-ai/purmemo-mcp`
-4. Re-run the failed publish job: `gh run rerun <run-id> -R purmemo-ai/purmemo-mcp` (the .mcpb upload rides on the same job)
+2. Since 2026-09-13 the workflow publishes with **npm Trusted Publishing** (GitHub OIDC) and uses no token. If it fails with a 404-on-PUT, check on npmjs.com → package purmemo-mcp → Settings → Trusted Publisher that GitHub Actions is configured with org `purmemo-ai`, repo `purmemo-mcp`, workflow `publish.yml`. There is no `NPM_TOKEN` secret to rotate any more.
+3. Re-run the failed publish job: `gh run rerun <run-id> -R purmemo-ai/purmemo-mcp` (the .mcpb upload rides on the same job). Note a re-run uses the workflow file as of the release's tag; a workflow fix needs a new release.
 
 ### MCP server can't connect to API
 1. Check `PURMEMO_API_KEY` is set
