@@ -374,3 +374,74 @@ export async function makeApiCall(endpoint, options = {}, apiKeyOverride = null)
     }
   });
 }
+
+// ---- read-base routing (purmemo-next stage 1, 2026-09-16) ------------------
+// When PURMEMO_READ_BASE_URL is set, the READ tools (recall_memories,
+// get_memory_details, discover_related_conversations via tools/execute) are
+// served by purmemo-next at that base, with the SAME credential; live stays the
+// writer and the fallback. Kill switches, both instant and no restart needed:
+//   - unset PURMEMO_READ_BASE_URL / set PURMEMO_READ_BASE_DISABLED=1, or
+//   - create the file ~/.purmemo/read-base.off (checked on every call).
+// Any failure on next (network, 5xx, 501 not-supported / unsupported filter)
+// falls back to live and is logged once per call — a bad next answer is never
+// worse than live for the user, only slower.
+import { existsSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
+
+export const READ_BASE_TOOLS = new Set(['recall_memories', 'get_memory_details', 'discover_related_conversations']);
+export const READ_BASE_KILL_FILE = join(homedir(), '.purmemo', 'read-base.off');
+
+export function readBaseUrl(env: NodeJS.ProcessEnv = process.env, killFileExists: (p: string) => boolean = existsSync): string | null {
+  const raw = (env.PURMEMO_READ_BASE_URL || '').trim().replace(/\/+$/, '');
+  if (!raw || env.PURMEMO_READ_BASE_DISABLED === '1') return null;
+  if (killFileExists(READ_BASE_KILL_FILE)) return null;
+  return raw;
+}
+
+/** Decide whether a tools/execute call is eligible for next: read tool, no live-only filters. */
+export function readBaseEligible(body: any): boolean {
+  if (!body || typeof body !== 'object') return false;
+  if (!READ_BASE_TOOLS.has(body.tool)) return false;
+  const a = body.arguments || {};
+  for (const f of ['intent', 'deadline', 'cluster']) if (a[f] !== undefined && a[f] !== null && a[f] !== '') return false;
+  return true;
+}
+
+type ReadCallDeps = { fetchImpl?: typeof fetch; fallback?: (endpoint: string, options: any) => Promise<any>; env?: NodeJS.ProcessEnv; killFileExists?: (p: string) => boolean; key?: string | null; onEvent?: (e: Record<string, unknown>) => void };
+
+/** Factory so the routing + fallback logic is testable without the network. */
+export function createReadCall(deps: ReadCallDeps = {}) {
+  const fetchImpl = deps.fetchImpl || globalThis.fetch;
+  const fallback = deps.fallback || ((endpoint: string, options: any) => makeApiCall(endpoint, options));
+  const onEvent = deps.onEvent || ((e: Record<string, unknown>) => structuredLog.info('read-base', e));
+  return async function readCall(endpoint: string, options: any = {}) {
+    const base = readBaseUrl(deps.env, deps.killFileExists);
+    let body: any = null;
+    try { body = options.body ? JSON.parse(options.body) : null; } catch { body = null; }
+    if (!base || !readBaseEligible(body)) return fallback(endpoint, options);
+    const key = deps.key !== undefined ? deps.key : getEffectiveApiKey();
+    if (!key) return fallback(endpoint, options);
+    const started = Date.now();
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), options.timeoutMs || 20000);
+      const r = await fetchImpl(`${base}${endpoint}`, { method: options.method || 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'User-Agent': _userAgent, ...(options.headers || {}) }, body: options.body, signal: controller.signal });
+      clearTimeout(timer);
+      if (!r.ok) {
+        const preview = (await r.text().catch(() => '')).slice(0, 200);
+        onEvent({ served_by: 'live', reason: `next HTTP ${r.status}`, tool: body.tool, ms: Date.now() - started, preview });
+        return fallback(endpoint, options);
+      }
+      const data = await r.json();
+      onEvent({ served_by: 'next', tool: body.tool, ms: Date.now() - started, base });
+      return data;
+    } catch (err: any) {
+      onEvent({ served_by: 'live', reason: `next error: ${err?.message || err}`, tool: body.tool, ms: Date.now() - started });
+      return fallback(endpoint, options);
+    }
+  };
+}
+
+/** Default read call used by the read tool handlers. */
+export const makeReadCall = createReadCall();

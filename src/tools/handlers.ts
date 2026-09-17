@@ -8,7 +8,7 @@
 
 import { appendFileSync } from 'node:fs';
 import { structuredLog } from '../lib/logger.js';
-import { makeApiCall, sanitizeUnicode, safeErrorMessage, wafSafeBody, getEffectiveApiKey } from '../lib/api-client.js';
+import { makeApiCall, sanitizeUnicode, safeErrorMessage, wafSafeBody, getEffectiveApiKey, makeReadCall } from '../lib/api-client.js';
 import {
   extractProjectContext,
   generateIntelligentTitle,
@@ -1405,7 +1405,7 @@ export async function handleDiscoverRelated(args) {
   try {
     const safeQuery = sanitizeUnicode(args.query || '');
 
-    const data = await makeApiCall(`/api/v10/mcp/tools/execute`, {
+    const data = await makeReadCall(`/api/v10/mcp/tools/execute`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -1553,7 +1553,7 @@ export async function handleRecallMemories(args) {
       });
     }
 
-    const data = await makeApiCall(`/api/v10/mcp/tools/execute`, {
+    const data = await makeReadCall(`/api/v10/mcp/tools/execute`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -1781,7 +1781,7 @@ export async function handleGetMemoryDetails(args) {
   } catch { /* AMP not running — continue to cloud */ }
 
   try {
-    const data = await makeApiCall(`/api/v10/mcp/tools/execute`, {
+    const data = await makeReadCall(`/api/v10/mcp/tools/execute`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
