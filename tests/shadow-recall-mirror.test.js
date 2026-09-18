@@ -32,6 +32,7 @@ mock.module('../dist/lib/api-client.js', {
     safeErrorMessage: (e) => e?.message || 'unknown',
     wafSafeBody: (body) => body,
     getEffectiveApiKey: () => 'test-key',
+    makeReadCall: mockMakeApiCall,
   },
 });
 
