@@ -56,6 +56,10 @@ export function initApiClient({ apiUrl, resolveApiKey, clientVersion, installMet
 // Circuit Breaker Pattern
 // ============================================================================
 
+/** Attach an HTTP status and a coarse class to an error so the breaker and the renderer can tell
+ *  "the API answered no" (4xx: quota, auth, forbidden, payment) from "the API is unreachable/broken". */
+export function tagError(err: any, status: number, kind: string) { err.status = status; err.kind = kind; return err; }
+
 export class CircuitBreaker {
   constructor(name, failureThreshold = 5, recoveryTimeout = 60000) {
     this.name = name;
@@ -88,6 +92,13 @@ export class CircuitBreaker {
       this._onSuccess();
       return result;
     } catch (error) {
+      // 2026-09-18: a 4xx is the API answering clearly (quota exceeded, bad key,
+      // forbidden, not found) — the service is UP. Counting those as failures
+      // opened the breaker after five quota rejections and turned "you are out
+      // of free recalls" into "Service temporarily unavailable" for a minute,
+      // which reads as an outage. Only server errors, timeouts and network
+      // failures trip it.
+      if (error && typeof error.status === 'number' && error.status >= 400 && error.status < 500) throw error;
       this._onFailure(error);
       throw error;
     }
@@ -145,37 +156,45 @@ export const apiCircuitBreaker = new CircuitBreaker('purmemo-api', 5, 60000);
 // ============================================================================
 
 export function safeErrorMessage(error) {
-  if (error.message?.includes('429') || error.message?.includes('quota')) {
-    return error.message; // Quota messages are user-facing
+  // 2026-09-18: every class of failure prints as WHAT IT IS. The three that
+  // matter most to a user: "you are out of quota" (an upsell, not an outage),
+  // "your key is wrong" (a setup problem), and "purmemo is unreachable or
+  // broken" (the only one that is actually about purmemo being down).
+  const kind = error && error.kind;
+  const status = error && typeof error.status === 'number' ? error.status : null;
+  if (kind === 'quota' || error.message?.includes('429') || error.message?.includes('quota')) {
+    return error.message; // already the full upsell text with usage, limit, link and reset date
   }
-  if (error.name === 'AbortError' || error.message?.includes('timeout')) {
-    return 'Request timed out. Please try again.';
+  if (kind === 'payment' || status === 402) {
+    return '💳 This feature needs a paid plan for this account.\n   Upgrade: https://app.purmemo.ai/dashboard?modal=plans';
+  }
+  if (kind === 'auth' || error.message?.includes('API Error 401')) {
+    return 'Invalid or missing API key (HTTP 401) — a setup problem, not an outage.\n\nOption 1 — Easy setup (opens browser):\n  npx purmemo-mcp setup\n\nOption 2 — Manual:\n  claude mcp remove purmemo\n  claude mcp add purmemo -e PURMEMO_API_KEY=your-key -- npx -y purmemo-mcp\n\nGet your API key at: https://app.purmemo.ai';
+  }
+  if (kind === 'waf') return error.message;
+  if (kind === 'forbidden' || status === 403) {
+    return 'This account is not allowed to do that (HTTP 403). If you are signed in to the wrong purmemo account, run `npx purmemo-mcp setup`.';
+  }
+  if (kind === 'timeout' || error.name === 'AbortError' || error.message?.includes('timeout')) {
+    return 'purmemo did not answer within 30 seconds. This is a slow or unreachable server, not your account — try again in a moment.';
   }
   if (error instanceof CircuitBreakerOpenError) {
-    return 'Service temporarily unavailable. Please try again in a moment.';
+    return 'purmemo has failed several times in the last minute (server error or network), so requests are paused for 60 seconds. This is not your account or quota — try again shortly.';
   }
-  if (error.message?.includes('API Error 401')) {
-    return 'Invalid or missing API key.\n\nOption 1 — Easy setup (opens browser):\n  npx purmemo-mcp setup\n\nOption 2 — Manual:\n  claude mcp remove purmemo\n  claude mcp add purmemo -e PURMEMO_API_KEY=your-key -- npx -y purmemo-mcp\n\nGet your key at: https://app.purmemo.ai';
+  if (kind === 'server' || (status !== null && status >= 500)) {
+    return `purmemo returned a server error (HTTP ${status}). This is on our side, not your account — try again shortly. If it persists, check https://status.purmemo.ai or email support@purmemo.ai.`;
   }
-  // Surface api-side detail messages on 4xx (404 / 422 / etc.) instead of
-  // hiding them behind the generic fallback. The api returns
-  //   { "detail": "<friendly user-facing message>" }
-  // for these cases — pull it out so the MCP user sees what actually went wrong.
-  const apiErrorMatch = error.message?.match(/^API Error (4\d\d):\s*(.*)$/s);
-  if (apiErrorMatch) {
-    const status = apiErrorMatch[1];
-    const body = apiErrorMatch[2];
-    try {
-      const parsed = JSON.parse(body);
-      if (typeof parsed?.detail === 'string') {
-        return parsed.detail;
-      }
-    } catch {
-      // body wasn't JSON — fall through
-    }
-    return `API Error ${status}: ${body.slice(0, 300)}`;
+  if (/ECONNREFUSED|ENOTFOUND|ECONNRESET|EAI_AGAIN|fetch failed|network/i.test(error.message || '')) {
+    return `Could not reach purmemo (${(error.message || '').slice(0, 80)}). Check your connection; if you are online, purmemo may be down.`;
   }
-  return 'An error occurred while processing your request. Please try again.';
+  // Any other API error: show the status and the server's own words, never a blank "an error occurred".
+  const m = /^API Error (\d{3}): ([\s\S]*)$/.exec(error.message || '');
+  if (m) {
+    const [, code, body] = m;
+    try { const parsed = JSON.parse(body); if (typeof parsed.detail === 'string') return `${parsed.detail} (HTTP ${code})`; if (parsed.detail && typeof parsed.detail.message === 'string') return `${parsed.detail.message} (HTTP ${code})`; } catch {}
+    return `API Error ${code}: ${body.slice(0, 300)}`;
+  }
+  return `Unexpected error: ${(error && error.message) ? error.message.slice(0, 200) : 'unknown'}`;
 }
 
 // ============================================================================
@@ -317,10 +336,10 @@ export async function makeApiCall(endpoint, options = {}, apiKeyOverride = null)
               `📅 Your quota resets on ${resetDateStr}`,
             ].join('\n');
 
-            throw new Error(userMessage);
+            throw tagError(new Error(userMessage), 429, 'quota');
           } catch (parseError) {
             if (parseError.message?.includes('Upgrade to Pro')) throw parseError;
-            throw new Error(`Monthly quota exceeded. Upgrade to Pro for unlimited access:\nhttps://app.purmemo.ai/dashboard?modal=plans`);
+            throw tagError(new Error(`Monthly quota exceeded. Upgrade to Pro for unlimited access:\nhttps://app.purmemo.ai/dashboard?modal=plans`), 429, 'quota');
           }
         }
 
@@ -331,13 +350,14 @@ export async function makeApiCall(endpoint, options = {}, apiKeyOverride = null)
             endpoint,
             content_length: options.body ? String(options.body).length : 0,
           });
-          throw new Error(
+          throw tagError(new Error(
             'Content contains patterns that triggered security filtering (e.g. SQL keywords or HTML tags). ' +
             'Try rephrasing or removing code snippets that look like SQL commands or script tags.'
-          );
+          ), 403, 'waf');
         }
 
-        throw new Error(`API Error ${response.status}: ${errorText}`);
+        throw tagError(new Error(`API Error ${response.status}: ${errorText}`), response.status,
+          response.status === 401 ? 'auth' : response.status === 403 ? 'forbidden' : response.status === 402 ? 'payment' : response.status >= 500 ? 'server' : 'client');
       }
 
       const data = await response.json();
@@ -360,7 +380,7 @@ export async function makeApiCall(endpoint, options = {}, apiKeyOverride = null)
           endpoint,
           timeout_ms: timeoutMs
         });
-        throw new Error('Request timeout after 30 seconds');
+        throw tagError(new Error('Request timeout after 30 seconds'), 0, 'timeout');
       }
 
       structuredLog.error('API call exception', {
