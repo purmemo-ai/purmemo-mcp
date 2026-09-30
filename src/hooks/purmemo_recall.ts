@@ -16,6 +16,8 @@
  */
 
 import * as path from 'node:path';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import {
   dbg, errLog, readState, writeState, pruneState, loadApiKey,
   apiGet, apiPost, readHookInput,
@@ -28,6 +30,66 @@ const TAG = 'recall';
 const MAX_MEMORIES = 5;
 const MAX_PREVIEW = 300;
 const MAX_TODOS = 8;
+
+// OBSERVATIONS vs RECORDS (2026-09-30). Screenshots, image captures and voice
+// notes are things a person or an assistant *observed*; they are searchable but
+// they must not take the front-door slots from the documents a session works
+// from. Found the hard way: an assistant's pop-up watcher saved a screenshot
+// memory every 30 minutes for four days and the brief showed five screenshots
+// while the week's real work sat in living documents nothing read.
+const OBSERVATION_SOURCE_TYPES = /screenshot|image_capture|image_picker|voice_share|voice_note|cosmo_chat_screenshot/i;
+const isObservation = (m: Record<string, unknown>) =>
+  OBSERVATION_SOURCE_TYPES.test(String(m.source_type || '')) || /^Cosmo screenshot /.test(String(m.title || ''));
+
+// PINNED DOCUMENTS: living documents read BY ID at every session start, before
+// anything "recent". A project pins them in <cwd>/.purmemo/pinned.json and a
+// person pins their own in ~/.purmemo/pinned.json — either shape:
+//   ["purmemo-next-roadmap", ...]  or  [{"conversationId": "...", "label": "roadmap"}, ...]
+// Each entry is fetched by conversation_id (the living-document identity), and
+// the brief says how fresh it is and where its last update came from, so a
+// session can tell a current record from a stale one instead of guessing.
+const MAX_PINNED = 6;
+const PINNED_STALE_DAYS = 7;
+type Pinned = { conversationId: string; label?: string };
+function readPinned(cwd: string | undefined): Pinned[] {
+  const files = [
+    cwd ? path.join(cwd, '.purmemo', 'pinned.json') : null,
+    path.join(os.homedir(), '.purmemo', 'pinned.json'),
+  ].filter(Boolean) as string[];
+  const out: Pinned[] = [];
+  const seen = new Set<string>();
+  for (const f of files) {
+    try {
+      if (!fs.existsSync(f)) continue;
+      const raw = JSON.parse(fs.readFileSync(f, 'utf8'));
+      const list = Array.isArray(raw) ? raw : (raw?.pinned || []);
+      for (const item of list) {
+        const p: Pinned = typeof item === 'string' ? { conversationId: item } : { conversationId: String(item?.conversationId || item?.conversation_id || ''), label: item?.label };
+        if (p.conversationId && !seen.has(p.conversationId)) { seen.add(p.conversationId); out.push(p); }
+      }
+    } catch (e) {
+      dbg(TAG, `pinned file unreadable ${f}: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+  return out.slice(0, MAX_PINNED);
+}
+
+/** One line per pinned document: title, age, and where the last update came from. */
+function describePinned(p: Pinned, m: Record<string, unknown> | null): { line: string; stale: boolean } {
+  const label = p.label ? `${p.label}: ` : '';
+  if (!m) return { line: `• ${label}${p.conversationId} — NOT FOUND (id typo, or it lives in another account)`, stale: true };
+  // Freshness = when the CONTENT last changed. content_updated_at moves only on
+  // content/title edits (server trigger); user_updated_at was not bumped by
+  // living-document appends until purmemo-api 2026-09-30 (a ledger appended
+  // daily read "73d ago"); updated_at moves on extraction. Prefer in that order.
+  const ts = (m.content_updated_at as string) || (m.user_updated_at as string) || (m.updated_at as string) || (m.created_at as string);
+  const ageDays = ts ? (Date.now() - new Date(ts).getTime()) / 86400000 : Infinity;
+  const stale = ageDays > PINNED_STALE_DAYS;
+  const when = ts ? relativeTime(new Date(ts)) : 'unknown age';
+  const via = m.platform ? ` via ${m.platform}` : '';
+  const size = typeof m.content === 'string' ? ` · ${Math.round((m.content as string).length / 1000)}K chars` : '';
+  return { line: `• ${label}${(m.title as string) || p.conversationId} — updated ${when}${via}${size}${stale ? ' — STALE (>7d): confirm against the transcript before trusting' : ''}`, stale };
+}
 
 function relativeTime(date: Date): string {
   const diff = Date.now() - date.getTime();
@@ -256,7 +318,11 @@ async function main(): Promise<void> {
   const { session_id, cwd, source } = hookData;
   dbg(TAG, `fired — platform=${platform} source=${source} session=${session_id} cwd=${cwd}`);
 
-  if (source === 'compact' || source === 'clear') {
+  // compact: the conversation is still here, only summarized — nothing to re-hydrate.
+  // clear: the context is gone but the session (and a phone attached to it) stays —
+  // this is exactly when the brief must run again (2026-09-30: `/clear` is how a
+  // long-lived remote-controlled session starts its next task without losing the phone).
+  if (source === 'compact') {
     dbg(TAG, `skip — source=${source}`);
     return;
   }
@@ -286,7 +352,34 @@ async function main(): Promise<void> {
     apiGet(apiKey, `/api/v1/todos?limit=${MAX_TODOS}`).catch(() => null),
     getAccountSnapshot(apiKey),
   ]);
-  const allMemories = (memResult as { memories?: Array<Record<string, unknown>> })?.memories || [];
+  const fetchedMemories = (memResult as { memories?: Array<Record<string, unknown>> })?.memories || [];
+  // Observations never take a front-door slot (see OBSERVATION_SOURCE_TYPES).
+  const observationCount = fetchedMemories.filter(isObservation).length;
+  const allMemories = fetchedMemories.filter(m => !isObservation(m));
+
+  // Pinned documents, by id, in parallel — the front door reads the record a
+  // session works from, not whatever was touched last.
+  const pinned = readPinned(cwd);
+  const pinnedRows = await Promise.all(pinned.map(async (p) => {
+    try {
+      const q = new URLSearchParams({ conversation_id: p.conversationId, limit: '1' });
+      const r = await apiGet(apiKey, `/api/v1/memories/?${q}`) as { memories?: Array<Record<string, unknown>> };
+      return describePinned(p, r?.memories?.[0] ?? null);
+    } catch (e) {
+      dbg(TAG, `pinned fetch failed ${p.conversationId}: ${e instanceof Error ? e.message : e}`);
+      return describePinned(p, null);
+    }
+  }));
+  const pinnedBlock: string[] = [];
+  if (pinnedRows.length) {
+    const staleCount = pinnedRows.filter(r => r.stale).length;
+    pinnedBlock.push(`[Pinned documents — read these first; they are the record this work runs from]`);
+    for (const r of pinnedRows) pinnedBlock.push(r.line);
+    pinnedBlock.push(staleCount
+      ? `Trust: ${pinnedRows.length - staleCount}/${pinnedRows.length} current, ${staleCount} stale — where a pinned document is stale, the transcript wins; say so rather than guess.`
+      : `Trust: all ${pinnedRows.length} pinned documents updated within ${PINNED_STALE_DAYS} days.`);
+    if (observationCount) pinnedBlock.push(`(${observationCount} observation${observationCount === 1 ? '' : 's'} — screenshots/captures — kept out of the recent list; still searchable.)`);
+  }
   // The brief's LIST shows the last MAX_MEMORIES saves from ANY source (iOS
   // share, web clipper, phone, CLI) — that is the hook's whole point. Only the
   // "Last session:" slot (memories[0]) must be conversation-derived, so a
@@ -309,13 +402,13 @@ async function main(): Promise<void> {
   const todos = (Array.isArray(todosResult) ? todosResult : (todosResult as { todos?: Array<Record<string, unknown>> })?.todos) || [];
   dbg(TAG, `recalled ${memories.length} memories, ${todos.length} todos, account=${account?.tier ?? 'unknown'}`);
 
-  if (!memories.length) { dbg(TAG, 'no memories found'); return; }
+  if (!memories.length && !pinnedBlock.length) { dbg(TAG, 'no memories found'); return; }
 
   // Compose handoff brief from V2 intelligence data
   const handoffBrief = composeHandoffBrief(memories, todos, projectName);
 
-  // Also build numbered list for quick-load (backward compat)
-  const contextLines = [handoffBrief];
+  // Pinned documents first (the record), then the brief, then the recent list.
+  const contextLines = pinnedBlock.length ? [...pinnedBlock, '', handoffBrief] : [handoffBrief];
   contextLines.push('');
   memories.forEach((mem, i) => {
     const title = (mem.title as string) || 'Untitled';
@@ -351,9 +444,12 @@ async function main(): Promise<void> {
   const headerBlock = header ? `${header}\n\n` : '';
 
   // Numbered list visible to user, full context silent to Claude
-  const banner = memories
+  const recentList = memories
     .map((m, i) => `${i + 1}. ${(m.title as string) || 'Untitled'}`)
     .join('\n');
+  // The person sees the pinned documents and their freshness too — that line is
+  // the signal that a fresh session can be trusted, or that the transcript wins.
+  const banner = pinnedBlock.length ? `${pinnedBlock.join('\n')}\n\nRecent:\n${recentList}` : recentList;
 
   // Platform-aware output. Claude Code treats `additionalContext` as silent
   // (model-only) and `systemMessage` as user-visible — so we send the rich
