@@ -454,6 +454,8 @@ async function saveSingleContent(content, title, tags = [], metadata = {}) {
     platform: PLATFORM,
     source_type: SOURCE_TYPE,
     conversation_id: metadata.conversationId || null,
+    // 'title' when the id is a title slug (server re-keys on a title collision).
+    conversation_id_source: metadata.conversationIdSource || 'explicit',
     mode: metadata._mode || 'replace',
     metadata: {
       ...metadata,
@@ -553,12 +555,21 @@ export async function handleSaveConversation(args) {
     const tags: string[] = Array.isArray(rawTags) ? rawTags : (rawTags ? [String(rawTags)] : ['complete-conversation']);
 
     let conversationId = args.conversationId;
+    // Tell the server HOW the id was made. A title-derived slug is only a guess
+    // at "the same document": "Complete Anime Tracking Database" and "Anime
+    // Tracking Database Update" slug the same. Since 2026-09-26 the server keys
+    // living documents on (user, conversation_id) alone — no platform — so a
+    // slug collision would otherwise overwrite a different document from any
+    // surface. With source='title' the server re-keys the save when the
+    // existing document's title differs; an explicit id is never re-keyed.
+    let conversationIdSource: 'explicit' | 'title' = 'explicit';
     if (!conversationId && title && !title.startsWith('Conversation 202')) {
       conversationId = title
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
         .substring(0, 100);
+      conversationIdSource = 'title';
 
       structuredLog.debug('Generated conversation ID from title', {
         request_id: requestId,
@@ -623,6 +634,7 @@ export async function handleSaveConversation(args) {
     // decide whether to INSERT or UPDATE in a single atomic operation.
 
     metadata.conversationId = conversationId;
+    metadata.conversationIdSource = conversationIdSource;
 
     // ADR-036: explicit mode parameter from tool surface takes precedence over
     // metadata._mode (which the /save skill sets internally). The MCP SDK's
