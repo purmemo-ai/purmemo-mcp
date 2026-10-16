@@ -39,8 +39,6 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-// SSEServerTransport kept for legacy /sse endpoint (Claude Desktop)
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -56,6 +54,7 @@ import {
   extractRelationships
 } from './intelligent-memory.js';
 import TokenStore from './auth/token-store.js';
+import { createLastRecallCache } from './lib/recall-cache.js';
 import { detectInstallMethod } from './auth/install-detection.js';
 import { structuredLog, logStructured } from './lib/logger.js';
 import {
@@ -65,7 +64,8 @@ import {
   apiCircuitBreaker,
   safeErrorMessage,
   sanitizeUnicode,
-  makeApiCall
+  makeApiCall,
+  getEffectiveApiKey
 } from './lib/api-client.js';
 import {
   initHandlers,
@@ -219,7 +219,11 @@ function readCurrentSessionId() {
 let resolvedApiKey: string | null = null;
 
 // Last recall result cache — maps ordinal "1"-"N" to UUID for get_memory_details
-let lastRecallIds = [];
+// Ordinal lookups ("1", "2" …) resolve against the LAST recall_memories result.
+// Keyed by the effective API key so that, in remote mode, one user's recall can
+// never feed another user's ordinal (2026-10-16 hardening). Single key in stdio
+// mode, so behaviour there is unchanged.
+const lastRecall = createLastRecallCache(() => getEffectiveApiKey());
 
 // Log API configuration
 structuredLog.info('API configuration loaded', {
@@ -295,8 +299,8 @@ const sessions = {
 // Initialize extracted tool handlers with server-scoped dependencies
 initHandlers({
   platform: PLATFORM,
-  getLastRecallIds: () => lastRecallIds,
-  setLastRecallIds: (ids) => { lastRecallIds = ids; },
+  getLastRecallIds: () => lastRecall.get(),
+  setLastRecallIds: (ids) => lastRecall.set(ids),
   readCurrentSessionId
 });
 

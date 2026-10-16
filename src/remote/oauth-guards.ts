@@ -1,0 +1,72 @@
+/**
+ * Pure guards for the OAuth pages served by the remote server.
+ *
+ * Everything that gets pasted into login.html / success.html goes through
+ * here. The templates are plain string replacement, so the only safe values
+ * are ones that provably cannot break out of the HTML attribute or the JS
+ * string literal they land in.
+ */
+
+/** HTML-escape a value for use inside an attribute or text node. */
+export function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * The `params` round-trip value is always base64/base64url that WE produced.
+ * Anything else is not ours and is refused rather than escaped, so the login
+ * page never carries attacker-shaped data at all.
+ */
+export function isSafeParams(value: unknown): boolean {
+  if (value === undefined || value === null || value === '') return true;
+  return typeof value === 'string' && value.length <= 4096 && /^[A-Za-z0-9_=-]+$/.test(value);
+}
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/**
+ * Validate an OAuth redirect_uri. Returns the normalised absolute URL string,
+ * or null when it must be rejected.
+ *   - must parse as an absolute URL
+ *   - https only, except http to a loopback host (local MCP clients)
+ *   - no embedded credentials, no fragment
+ */
+export function validateRedirectUri(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 2048) return null;
+  let url: URL;
+  try { url = new URL(value); } catch { return null; }
+  if (url.username || url.password || url.hash) return null;
+  const host = url.hostname.toLowerCase();
+  if (url.protocol === 'https:') return url.href;
+  if (url.protocol === 'http:' && LOOPBACK_HOSTS.has(host)) return url.href;
+  return null;
+}
+
+/**
+ * Build the callback URL the success page will navigate to. `code` and
+ * `state` are always URL-encoded so they cannot smuggle extra parameters.
+ */
+export function buildCallbackUrl(redirectUri: string, code: string, state?: string | null): string {
+  const sep = redirectUri.includes('?') ? '&' : '?';
+  let url = `${redirectUri}${sep}code=${encodeURIComponent(code)}`;
+  if (state) url += `&state=${encodeURIComponent(state)}`;
+  return url;
+}
+
+/**
+ * Serialise a value for insertion inside a <script> block as a JS string
+ * literal. JSON.stringify handles quotes/backslashes; the extra replacements
+ * stop `</script>` and U+2028/2029 from terminating the block or the literal.
+ */
+export function jsStringLiteral(value: string): string {
+  const LS = String.fromCharCode(0x2028), PS = String.fromCharCode(0x2029);
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .split(LS).join('\\u2028')
+    .split(PS).join('\\u2029');
+}
