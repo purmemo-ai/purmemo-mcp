@@ -47,8 +47,8 @@ export function initHandlers(deps: {
 }
 
 // lastRecallIds is mutable shared state — use getter/setter to keep server.ts as owner
-let _getLastRecallIds: () => string[] = () => lastRecallIds;
-let _setLastRecallIds: (ids: string[]) => void = (ids) => { lastRecallIds = ids; };
+let _getLastRecallIds: () => string[] = () => [];
+let _setLastRecallIds: (ids: string[]) => void = () => {};
 
 // ============================================================================
 // Shadow mirror (purmemo rebuild — "the Door")

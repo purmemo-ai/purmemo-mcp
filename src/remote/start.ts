@@ -1399,6 +1399,7 @@ export async function startRemoteServer(ctx) {
   process.on('SIGINT', async () => {
     structuredLog.info('Shutting down remote server...');
     clearInterval(sessionCleanupInterval);
+    clearInterval(oauthHousekeeping);
     connMonitor.stop();
     mcpSessions.clear();
     process.exit(0);

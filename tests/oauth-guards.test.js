@@ -57,11 +57,17 @@ describe('buildCallbackUrl + jsStringLiteral', () => {
     assert.equal(buildCallbackUrl('https://c.ai/cb?k=v', 'c'), 'https://c.ai/cb?k=v&code=c');
   });
   it('produces a JS literal that cannot close the string or the script tag', () => {
-    const lit = jsStringLiteral('https://c.ai/cb?state="</script><script>alert(1)</script>');
+    const nasty = 'https://c.ai/cb?state="</script><script>alert(1)</script>&x=$&$\'' + String.fromCharCode(0x2028) + String.fromCharCode(0x2029);
+    const lit = jsStringLiteral(nasty);
     assert.ok(lit.startsWith('"') && lit.endsWith('"'));
     assert.ok(!lit.includes('</script>'), 'must not contain a literal </script>');
-    assert.ok(!/[^\\]"[^$]/.test(lit.slice(1, -1)), 'no unescaped quote inside');
-    // Round-trips to the original once evaluated as JS.
-    assert.equal(Function(`return ${lit}`)(), 'https://c.ai/cb?state="</script><script>alert(1)</script>');
+    assert.ok(!lit.includes(String.fromCharCode(0x2028)) && !lit.includes(String.fromCharCode(0x2029)), 'line separators are escaped');
+    assert.equal(JSON.parse(lit), nasty, 'it is valid JSON that round-trips');
+    assert.equal(Function(`return ${lit}`)(), nasty, 'and valid JS that round-trips');
+    // The way start.ts uses it: a replacer FUNCTION, so $& and $' are never interpreted.
+    const page = '<script>go("<!-- REDIRECT_URL -->");</script><p>tail</p>';
+    const out = page.replace('"<!-- REDIRECT_URL -->"', () => lit);
+    assert.equal(out.split('<script>').length, 2, 'no second <script> appeared');
+    assert.ok(!out.includes('tail</p>");'), "$' did not splice the page tail into the literal");
   });
 });
