@@ -17,7 +17,9 @@ describe('createLastRecallCache', () => {
       cache.set(['b-1']);
     });
     await runWithApiKey('key-A', async () => assert.deepEqual(cache.get(), ['a-1', 'a-2']));
-    assert.deepEqual(cache.get(), [], 'no key → anonymous bucket, empty');
+    assert.deepEqual(cache.get(), [], 'no key → nothing readable');
+    cache.set(['leak']); assert.deepEqual(cache.get(), [], 'no key → nothing stored either');
+    assert.equal(cache.size(), 2, 'only the two real keys hold buckets');
   });
   it('two users interleaved across awaits still only see their own ids', async () => {
     const cache = createLastRecallCache(() => getEffectiveApiKey());

@@ -330,7 +330,10 @@ export async function startRemoteServer(ctx) {
 
     const localHandler = localOnlyHandlers[toolName];
     if (localHandler) {
-      const effectiveKey = apiKey || resolvedApiKey;
+      // apiKey is always the caller's validated key here (auth happens before dispatch).
+      // Never fall back to the host's own profile key for a remote caller.
+      if (!apiKey) return { content: [{ type: 'text', text: 'Error: Authentication required' }] };
+      const effectiveKey = apiKey;
       try {
         // runWithApiKey scopes the key to this async context via AsyncLocalStorage —
         // concurrent requests from different users never bleed into each other.

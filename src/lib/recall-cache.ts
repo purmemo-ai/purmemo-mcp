@@ -10,11 +10,13 @@
  */
 export function createLastRecallCache(getBucket: () => string | null | undefined, maxKeys = 500) {
   const byBucket = new Map<string, string[]>();
-  const bucket = () => getBucket() || '__anonymous__';
   return {
-    get(): string[] { return byBucket.get(bucket()) || []; },
+    // No key → no bucket. An unauthenticated caller must never read or write
+    // anything here, so there is deliberately no shared "anonymous" bucket.
+    get(): string[] { const b = getBucket(); return b ? (byBucket.get(b) || []) : []; },
     set(ids: string[]): void {
-      const b = bucket();
+      const b = getBucket();
+      if (!b) return;
       byBucket.delete(b); // re-insert so Map order == recency
       byBucket.set(b, ids);
       while (byBucket.size > maxKeys) byBucket.delete(byBucket.keys().next().value as string);
