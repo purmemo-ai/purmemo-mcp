@@ -6,6 +6,7 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
+import { createHash } from 'node:crypto';
 
 let base, srv;
 const realFetch = globalThis.fetch;
@@ -74,6 +75,26 @@ describe('/login reflects nothing it did not mint', () => {
     const html = await r.text();
     assert.ok(html.includes('value="eyJjbGllbnRfaWQiOiJ4In0"'));
     assert.ok(html.includes('/oauth/google/login?params=eyJjbGllbnRfaWQiOiJ4In0"'));
+  });  it('standard base64 params survive both the href and the form', async () => {
+    const r = await local('/login?params=' + encodeURIComponent('abc+/='));
+    assert.equal(r.status, 200);
+    const html = await r.text();
+    assert.ok(html.includes('?params=abc%2B%2F%3D"'), 'href is URL-encoded');
+    assert.ok(html.includes('value="abc+/="'), 'hidden input carries the raw value');
+  });
+  it('a failed sign-in bounces back with params URL-encoded', async () => {
+    const r = await local('/login', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ email: 'a@b.c', password: 'x', params: 'abc+/=' }).toString() });
+    assert.equal(r.status, 302);
+    assert.ok(r.headers.get('location').startsWith('/login?params=abc%2B%2F%3D&error='), r.headers.get('location'));
+  });
+});
+
+describe('/oauth/callback', () => {
+  it('reflects a provider error as plain text, never HTML', async () => {
+    const r = await local('/oauth/callback?error=' + encodeURIComponent('<script>alert(1)</script>'));
+    assert.equal(r.status, 400);
+    assert.match(r.headers.get('content-type'), /^text\/plain/);
+    assert.ok(!(await r.text()).includes('<script>'));
   });
 });
 
@@ -101,5 +122,27 @@ describe('/oauth/authorize redirect handling', () => {
     assert.ok(!html.includes('</script><script>alert'), 'raw state must not reach the page');
     assert.ok(html.includes('window.location.href = "https://claude.ai/cb?code=code_'), 'callback is emitted as a JSON string literal');
     assert.ok(html.includes('&state=%22%3C%2Fscript%3E'), 'state is URL-encoded into the callback');
+  });  it("a redirect_uri containing $' cannot corrupt the emitted script", async () => {
+    const session = Buffer.from('pm_test_key').toString('base64');
+    const r = await local('/oauth/authorize?' + q({ redirect_uri: "https://claude.ai/cb$'x", session }));
+    assert.equal(r.status, 200);
+    const html = await r.text();
+    assert.ok(html.includes(`window.location.href = "https://claude.ai/cb$'x?code=code_`), 'URL emitted verbatim inside the literal');
+    const script = html.split('<script>').pop().split('</script>')[0];
+    assert.doesNotThrow(() => new Function(script), 'the success script must still compile');
+  });
+  it('end to end: the code minted on the success page exchanges at /oauth/token with the exact redirect_uri the client sent', async () => {
+    const verifier = 'v'.repeat(43);
+    const challenge = createHash('sha256').update(verifier).digest('base64url');
+    const redirect = 'http://localhost:80/cb'; // WHATWG would normalise this to http://localhost/cb
+    const session = Buffer.from('pm_test_key').toString('base64');
+    const page = await (await local('/oauth/authorize?' + new URLSearchParams({ client_id: 'claude-e2e', code_challenge: challenge, code_challenge_method: 'S256', redirect_uri: redirect, state: 'st', session }))).text();
+    const code = page.match(/code=(code_[A-Za-z0-9_-]+)/)?.[1];
+    assert.ok(code, 'a code is on the page');
+    const token = await local('/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grant_type: 'authorization_code', code, redirect_uri: redirect, code_verifier: verifier, client_id: 'claude-e2e' }) });
+    assert.equal(token.status, 200, await token.clone().text());
+    assert.equal((await token.json()).access_token, 'pm_test_key');
+    const replay = await local('/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grant_type: 'authorization_code', code, redirect_uri: redirect, code_verifier: verifier, client_id: 'claude-e2e' }) });
+    assert.equal(replay.status, 400, 'codes are single use');
   });
 });

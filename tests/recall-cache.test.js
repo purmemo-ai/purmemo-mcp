@@ -19,6 +19,14 @@ describe('createLastRecallCache', () => {
     await runWithApiKey('key-A', async () => assert.deepEqual(cache.get(), ['a-1', 'a-2']));
     assert.deepEqual(cache.get(), [], 'no key → anonymous bucket, empty');
   });
+  it('two users interleaved across awaits still only see their own ids', async () => {
+    const cache = createLastRecallCache(() => getEffectiveApiKey());
+    const tick = () => new Promise((r) => setTimeout(r, 5));
+    await Promise.all([
+      runWithApiKey('key-A', async () => { cache.set(['a-1']); await tick(); await tick(); assert.deepEqual(cache.get(), ['a-1']); }),
+      runWithApiKey('key-B', async () => { await tick(); cache.set(['b-1']); await tick(); assert.deepEqual(cache.get(), ['b-1']); }),
+    ]);
+  });
   it('behaves like a single global when there is only one key (stdio mode)', () => {
     const cache = createLastRecallCache(() => 'only-key');
     cache.set(['x']); assert.deepEqual(cache.get(), ['x']);

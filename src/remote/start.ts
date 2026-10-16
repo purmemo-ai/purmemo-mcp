@@ -1018,7 +1018,7 @@ export async function startRemoteServer(ctx) {
 
           // Return success page
           let successHtml = readFileSync(join(__remoteDir, 'success.html'), 'utf8');
-          successHtml = successHtml.replace('"<!-- REDIRECT_URL -->"', jsStringLiteral(callbackUrl));
+          successHtml = successHtml.replace('"<!-- REDIRECT_URL -->"', () => jsStringLiteral(callbackUrl));
           return res.type('html').send(successHtml);
         }
       } catch (e) {
@@ -1040,7 +1040,9 @@ export async function startRemoteServer(ctx) {
     const signupComplete = req.query.signup_complete;
     let html = readFileSync(join(__remoteDir, 'login.html'), 'utf8');
     // Inject params into template (validated above; escaped for defence in depth)
-    html = html.replace(/<!-- PARAMS -->/g, escapeHtml(params));
+    html = html
+      .replace(/\?params=<!-- PARAMS -->/g, () => '?params=' + escapeHtml(encodeURIComponent(params)))
+      .replace(/<!-- PARAMS -->/g, () => escapeHtml(params));
     if (signupComplete) {
       html = html.replace('<!-- SIGNUP_BANNER -->',
         '<div class="success-banner">Account created — sign in below to continue.</div>');
@@ -1089,16 +1091,19 @@ export async function startRemoteServer(ctx) {
 
   // ── Shared: build OAuth redirect URL from params ──────────────────────────
   function buildAuthorizeRedirect(sessionParam: string, params?: string): string {
-    if (!params) return `/oauth/authorize?session=${sessionParam}`;
+    if (!params) return `/oauth/authorize?session=${encodeURIComponent(sessionParam)}`;
     const oauthParams = JSON.parse(Buffer.from(params, 'base64url').toString());
-    let url = `/oauth/authorize?client_id=${oauthParams.client_id}`;
-    url += `&redirect_uri=${encodeURIComponent(oauthParams.redirect_uri)}`;
-    url += `&response_type=code&code_challenge=${oauthParams.code_challenge}`;
-    url += `&code_challenge_method=${oauthParams.code_challenge_method || 'S256'}`;
-    if (oauthParams.scope) url += `&scope=${oauthParams.scope}`;
-    if (oauthParams.state) url += `&state=${oauthParams.state}`;
-    url += `&session=${sessionParam}`;
-    return url;
+    const q = new URLSearchParams({
+      client_id: String(oauthParams.client_id ?? ''),
+      redirect_uri: String(oauthParams.redirect_uri ?? ''),
+      response_type: 'code',
+      code_challenge: String(oauthParams.code_challenge ?? ''),
+      code_challenge_method: String(oauthParams.code_challenge_method || 'S256'),
+    });
+    if (oauthParams.scope) q.set('scope', String(oauthParams.scope));
+    if (oauthParams.state) q.set('state', String(oauthParams.state));
+    q.set('session', sessionParam);
+    return `/oauth/authorize?${q.toString()}`;
   }
 
   // ── OAuth: Login Submit ──
@@ -1116,7 +1121,7 @@ export async function startRemoteServer(ctx) {
       });
       if (!authResp.ok) {
         const errParam = authResp.status === 429 ? 'rate_limit' : 'invalid_credentials';
-        const loginUrl = params ? `/login?params=${params}&error=${errParam}` : `/login?error=${errParam}`;
+        const loginUrl = params ? `/login?params=${encodeURIComponent(params)}&error=${errParam}` : `/login?error=${errParam}`;
         return res.redirect(loginUrl);
       }
       const authData = await authResp.json();
@@ -1149,20 +1154,20 @@ export async function startRemoteServer(ctx) {
         signal: AbortSignal.timeout(10000)
       });
       if (!regResp.ok) {
-        const loginUrl = params ? `/login?params=${params}` : '/login';
+        const loginUrl = params ? `/login?params=${encodeURIComponent(params)}` : '/login';
         return res.redirect(loginUrl);
       }
       const authData = await regResp.json();
       const jwt = authData.access_token;
       if (!jwt) {
-        const loginUrl = params ? `/login?params=${params}&signup_complete=1` : '/login?signup_complete=1';
+        const loginUrl = params ? `/login?params=${encodeURIComponent(params)}&signup_complete=1` : '/login?signup_complete=1';
         return res.redirect(loginUrl);
       }
 
       // Mint a long-lived API key — survives Render restarts and 4hr JWT expiry
       const longLivedKey = await mintOAuthApiKey(jwt);
       if (!longLivedKey) {
-        const loginUrl = params ? `/login?params=${params}&signup_complete=1` : '/login?signup_complete=1';
+        const loginUrl = params ? `/login?params=${encodeURIComponent(params)}&signup_complete=1` : '/login?signup_complete=1';
         return res.redirect(loginUrl);
       }
 
@@ -1195,6 +1200,7 @@ export async function startRemoteServer(ctx) {
   // ── OAuth: Google Login ──
   app.get('/oauth/google/login', (req, res) => {
     const params = req.query.params || '';
+    if (!isSafeParams(params)) return res.status(400).type('text').send('Invalid params');
     const stateId = randomUUID();
     let statePayload = stateId;
     if (params) {
@@ -1208,6 +1214,7 @@ export async function startRemoteServer(ctx) {
   // ── OAuth: GitHub Login ──
   app.get('/oauth/github/login', (req, res) => {
     const params = req.query.params || '';
+    if (!isSafeParams(params)) return res.status(400).type('text').send('Invalid params');
     const stateId = randomUUID();
     let statePayload = stateId;
     if (params) {
@@ -1222,7 +1229,11 @@ export async function startRemoteServer(ctx) {
   app.get('/oauth/callback', async (req, res) => {
     try {
       const { token, refresh_token: callbackRefreshToken, state, error } = req.query;
-      if (error) return res.status(400).send(`OAuth failed: ${error}`);
+      if (error) {
+        // Provider error codes are plain tokens (access_denied …); echo only that shape, as text.
+        const safeError = String(error).replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 64) || 'unknown_error';
+        return res.status(400).type('text').send(`OAuth failed: ${safeError}`);
+      }
       if (!token || !state) return res.status(400).send('Missing token or state');
 
       // Recover MCP params from state
@@ -1276,7 +1287,7 @@ export async function startRemoteServer(ctx) {
 
       // Return success page
       let successHtml = readFileSync(join(__remoteDir, 'success.html'), 'utf8');
-      successHtml = successHtml.replace('"<!-- REDIRECT_URL -->"', jsStringLiteral(finalRedirect));
+      successHtml = successHtml.replace('"<!-- REDIRECT_URL -->"', () => jsStringLiteral(finalRedirect));
       res.type('html').send(successHtml);
     } catch (e) {
       structuredLog.error('OAuth callback error', { error: e.message });
