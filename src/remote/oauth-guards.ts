@@ -28,12 +28,16 @@ export function isSafeParams(value: unknown): boolean {
 }
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+// Schemes that can run script or read local files if a browser follows them.
+const FORBIDDEN_SCHEMES = new Set(['javascript:', 'data:', 'vbscript:', 'file:', 'blob:', 'about:', 'ftp:']);
 
 /**
  * Validate an OAuth redirect_uri. Returns the normalised absolute URL string,
  * or null when it must be rejected.
  *   - must parse as an absolute URL
- *   - https only, except http to a loopback host (local MCP clients)
+ *   - https; http only to a loopback host (local MCP clients such as mcp-remote)
+ *   - private-use app schemes (RFC 8252 §7.1, e.g. cursor://, vscode://) are
+ *     allowed so native editors keep working; script/file schemes never are
  *   - no embedded credentials, no fragment
  */
 export function validateRedirectUri(value: unknown): string | null {
@@ -41,9 +45,11 @@ export function validateRedirectUri(value: unknown): string | null {
   let url: URL;
   try { url = new URL(value); } catch { return null; }
   if (url.username || url.password || url.hash) return null;
-  const host = url.hostname.toLowerCase();
+  if (FORBIDDEN_SCHEMES.has(url.protocol)) return null;
   if (url.protocol === 'https:') return url.href;
-  if (url.protocol === 'http:' && LOOPBACK_HOSTS.has(host)) return url.href;
+  if (url.protocol === 'http:') return LOOPBACK_HOSTS.has(url.hostname.toLowerCase()) ? url.href : null;
+  // private-use scheme: must look like one (letters, digits, + . -) and have an authority or path
+  if (/^[a-z][a-z0-9+.-]*:$/i.test(url.protocol) && (url.hostname || url.pathname.length > 1)) return url.href;
   return null;
 }
 

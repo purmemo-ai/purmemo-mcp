@@ -38,9 +38,13 @@ describe('validateRedirectUri', () => {
     assert.equal(validateRedirectUri('http://localhost:6274/oauth/callback'), 'http://localhost:6274/oauth/callback');
     assert.equal(validateRedirectUri('http://127.0.0.1:3000/cb?x=1'), 'http://127.0.0.1:3000/cb?x=1');
   });
+  it('accepts private-use app schemes used by native editors', () => {
+    assert.equal(validateRedirectUri('cursor://anysphere.cursor-retrieval/oauth/user-x/callback'), 'cursor://anysphere.cursor-retrieval/oauth/user-x/callback');
+    assert.equal(validateRedirectUri('vscode://ms-vscode.mcp/callback'), 'vscode://ms-vscode.mcp/callback');
+  });
   it('rejects javascript:, data:, relative, http to the internet, creds and fragments', () => {
     for (const bad of [
-      'javascript:alert(1)', 'data:text/html,hi', '/relative', 'claude.ai/cb', '',
+      'javascript:alert(1)', 'data:text/html,hi', 'vbscript:x', 'file:///etc/passwd', 'blob:https://x/y', 'about:blank', '/relative', 'claude.ai/cb', '',
       'http://evil.example/cb', 'https://user:pw@claude.ai/cb', 'https://claude.ai/cb#frag',
       '";alert(1);//', null, undefined, 42, 'https://' + 'a'.repeat(3000)
     ]) assert.equal(validateRedirectUri(bad), null, `should reject ${String(bad).slice(0, 40)}`);
