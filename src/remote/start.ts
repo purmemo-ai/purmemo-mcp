@@ -7,8 +7,8 @@
  */
 
 import { structuredLog } from '../lib/logger.js';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { apiCircuitBreaker, runWithApiKey } from '../lib/api-client.js';
+import { escapeHtml, isSafeParams, validateRedirectUri, buildCallbackUrl, jsStringLiteral } from './oauth-guards.js';
 import {
   handleSaveConversation,
   handleSaveArtifact,
@@ -68,7 +68,7 @@ export async function startRemoteServer(ctx) {
   // REMOTE MODE — Express + Streamable HTTP + SSE (replaces Python server)
   // ========================================================================
   const { default: express } = await import('express');
-  const { randomUUID } = await import('node:crypto');
+  const { randomUUID, randomBytes, createHmac, timingSafeEqual } = await import('node:crypto');
 
   const app = express();
   app.use(express.json());
@@ -93,9 +93,9 @@ export async function startRemoteServer(ctx) {
     next();
   });
 
-  // Session/transport management
-  const transports = {};
+  // Session management
   const startTime = Date.now();
+  const mcpSessions = new Map(); // Streamable HTTP sessions
   let connectionCount = 0;
   let toolCallCounts = {};
   let recentErrors = []; // last 100 errors
@@ -127,7 +127,7 @@ export async function startRemoteServer(ctx) {
       status: 'healthy',
       version: CLIENT_VERSION,
       timestamp: new Date().toISOString(),
-      active_connections: Object.keys(transports).length,
+      active_connections: mcpSessions.size,
       metrics: {
         memory_usage_mb: Math.round(mem.rss / 1048576 * 10) / 10,
         heap_used_mb: Math.round(mem.heapUsed / 1048576 * 10) / 10,
@@ -155,7 +155,7 @@ export async function startRemoteServer(ctx) {
         runtime: 'node',
         api_backend: API_URL,
         environment: process.env.NODE_ENV || 'production',
-        capabilities: ['tools', 'resources', 'prompts', 'streamable-http', 'sse']
+        capabilities: ['tools', 'resources', 'prompts', 'streamable-http']
       }
     });
   });
@@ -173,8 +173,6 @@ export async function startRemoteServer(ctx) {
   // ── Custom Streamable HTTP handler (mirrors Python main.py POST /mcp/messages) ──
   // NOT using MCP SDK transport — custom handler for ChatGPT widget compatibility
 
-  // Streamable HTTP sessions
-  const mcpSessions = new Map();
   const SUPPORTED_PROTOCOL_VERSIONS = new Set(['2024-11-05', '2025-11-05', '2025-03-26']);
 
   // Session cleanup — remove stale sessions every 5 minutes (matches Python).
@@ -200,6 +198,7 @@ export async function startRemoteServer(ctx) {
     }
     if (cleaned > 0) structuredLog.info('Cleaned up stale sessions', { count: cleaned });
   }, 5 * 60 * 1000);
+  sessionCleanupInterval.unref?.(); // housekeeping must never keep the process alive on its own
 
   // Helper: validate API key from Authorization header
   async function validateApiKeyFromRequest(req) {
@@ -331,7 +330,10 @@ export async function startRemoteServer(ctx) {
 
     const localHandler = localOnlyHandlers[toolName];
     if (localHandler) {
-      const effectiveKey = apiKey || resolvedApiKey;
+      // apiKey is always the caller's validated key here (auth happens before dispatch).
+      // Never fall back to the host's own profile key for a remote caller.
+      if (!apiKey) return { content: [{ type: 'text', text: 'Error: Authentication required' }] };
+      const effectiveKey = apiKey;
       try {
         // runWithApiKey scopes the key to this async context via AsyncLocalStorage —
         // concurrent requests from different users never bleed into each other.
@@ -775,6 +777,16 @@ export async function startRemoteServer(ctx) {
     req.url = '/mcp/messages';
     return app._router.handle(req, res, () => res.status(404).end());
   });
+  // GET (SSE keepalive stream) and DELETE (session end) on the advertised /mcp
+  // path too, so a client that only knows /mcp gets the real handlers, not 404.
+  app.get('/mcp', async (req, res) => {
+    req.url = '/mcp/messages';
+    return app._router.handle(req, res, () => res.status(404).end());
+  });
+  app.delete('/mcp', (req, res) => {
+    req.url = '/mcp/messages';
+    return app._router.handle(req, res, () => res.status(404).end());
+  });
 
   // ── /figma — Figma Make endpoint (header auth only, no OAuth discovery) ──
   // Figma Make auto-discovers OAuth from /.well-known and opens a broken OAuth popup.
@@ -795,41 +807,30 @@ export async function startRemoteServer(ctx) {
     return app._router.handle(req, res, () => res.status(404).end());
   });
 
-  // ── /mcp/sse — legacy SSE endpoint (Python had this) ──
-  app.get('/mcp/sse', async (req, res) => {
-    // Forward to /sse handler
-    req.url = '/sse';
-    return app._router.handle(req, res, () => res.status(404).end());
-  });
-
-  // ── Deprecated SSE transport (/sse + /messages) ──
-  app.get('/sse', async (req, res) => {
-    structuredLog.info('SSE connection established (deprecated transport)');
-    const transport = new SSEServerTransport('/messages', res);
-    transports[transport.sessionId] = transport;
-    connMonitor.trackConnection(transport.sessionId, { type: 'sse' });
-    connectionCount++;
-    res.on('close', () => {
-      delete transports[transport.sessionId];
-      connMonitor.trackDisconnection(transport.sessionId);
-      structuredLog.info('SSE connection closed', { session_id: transport.sessionId });
-    });
-    await server.connect(transport);
-  });
-
-  app.post('/messages', async (req, res) => {
-    const sessionId = req.query.sessionId;
-    const transport = transports[sessionId];
-    if (transport instanceof SSEServerTransport) {
-      await transport.handlePostMessage(req, res, req.body);
-    } else {
-      res.status(400).json({
-        jsonrpc: '2.0',
-        error: { code: -32000, message: 'No SSE transport found for this session' },
-        id: null
-      });
-    }
-  });
+  // ── Retired SSE transport (/sse, /mcp/sse, /messages) ──
+  // Retired 2026-10-16. The 2024-11-05 HTTP+SSE transport attached every caller
+  // to the one shared Server instance with no authentication, and the SDK's
+  // Protocol.connect() overwrites the transport on each connect, so two
+  // clients would receive each other's responses. Five months of production
+  // logs show no MCP client ever used it (only scanners). The Python server
+  // had already retired it with 410 in 2026-02. Streamable HTTP at
+  // /mcp/messages (or /mcp) is the supported transport.
+  const SSE_RETIRED = {
+    error: 'transport_retired',
+    message: 'The HTTP+SSE transport (/sse, /messages) has been retired. Connect with Streamable HTTP instead.',
+    transport: 'streamable-http',
+    endpoint: '/mcp/messages',
+    documentation: 'https://modelcontextprotocol.io/specification/2025-03-26/basic/transports'
+  };
+  function sseRetired(req, res) {
+    structuredLog.info('Retired SSE transport requested', { path: req.path, user_agent: req.headers['user-agent'] || null });
+    res.status(410).set('Location', '/mcp/messages').json(SSE_RETIRED);
+  }
+  app.all('/sse', sseRetired);
+  app.all('/sse/', sseRetired);
+  app.all('/mcp/sse', sseRetired);
+  app.all('/mcp/sse/', sseRetired);
+  app.all('/messages', sseRetired);
 
   // ── MCP well-known endpoints (for OAuth discovery) ──
   // Helper: detect Figma Make requests (they send Origin: https://www.figma.com)
@@ -876,8 +877,7 @@ export async function startRemoteServer(ctx) {
       server_name: 'pūrmemo MCP Server',
       server_version: CLIENT_VERSION,
       transports: [
-        { type: 'http', url: `${serverUrl}/mcp` },
-        { type: 'sse', url: `${serverUrl}/sse` }
+        { type: 'http', url: `${serverUrl}/mcp` }
       ],
       authentication: {
         type: 'oauth2',
@@ -918,7 +918,6 @@ export async function startRemoteServer(ctx) {
       endpoints: {
         base_url: serverUrl,
         mcp: '/mcp/messages',
-        sse: '/sse',
         health: '/health'
       },
       tools: TOOLS.map(t => ({ name: t.name, description: t.description.split('\n')[0] })),
@@ -939,7 +938,7 @@ export async function startRemoteServer(ctx) {
   const refreshTokenStore: Record<string, { token: string; createdAt: number }> = {};
 
   // Clean up abandoned OAuth states (>10 min) and expired refresh tokens (>24 hr)
-  setInterval(() => {
+  const oauthHousekeeping = setInterval(() => {
     const now = Date.now();
     for (const key of Object.keys(oauthStateStorage)) {
       if (now - oauthStateStorage[key].createdAt > 600_000) delete oauthStateStorage[key];
@@ -948,6 +947,7 @@ export async function startRemoteServer(ctx) {
       if (now - refreshTokenStore[key].createdAt > 86_400_000) delete refreshTokenStore[key];
     }
   }, 300_000); // every 5 minutes
+  oauthHousekeeping.unref?.(); // housekeeping must never keep the process alive on its own
 
   // Rate limiter (per-IP, leaky bucket)
   const rateLimits = {};
@@ -1009,6 +1009,8 @@ export async function startRemoteServer(ctx) {
 
     if (!client_id) return res.status(400).json({ error: 'Missing client_id' });
     if (!redirect_uri) return res.status(400).json({ error: 'Missing redirect_uri' });
+    const safeRedirectUri = validateRedirectUri(redirect_uri);
+    if (!safeRedirectUri) return res.status(400).json({ error: 'Invalid redirect_uri: must be an absolute https URL (http is allowed for localhost only)' });
     if (!code_challenge) return res.status(400).json({ error: 'Missing code_challenge (PKCE required)' });
 
     // If we have a session (base64-encoded API key), complete the flow
@@ -1022,15 +1024,14 @@ export async function startRemoteServer(ctx) {
         });
         if (meResp.ok) {
           const code = generateCode();
-          storeAuthCode({ code, apiKey, clientId: client_id, redirectUri: redirect_uri,
+          storeAuthCode({ code, apiKey, clientId: client_id, redirectUri: safeRedirectUri,
             codeChallenge: code_challenge, codeChallengeMethod: code_challenge_method, scope, state });
 
-          let callbackUrl = redirect_uri + (redirect_uri.includes('?') ? '&' : '?') + `code=${code}`;
-          if (state) callbackUrl += `&state=${state}`;
+          const callbackUrl = buildCallbackUrl(safeRedirectUri, code, state);
 
           // Return success page
           let successHtml = readFileSync(join(__remoteDir, 'success.html'), 'utf8');
-          successHtml = successHtml.replace('<!-- REDIRECT_URL -->', callbackUrl);
+          successHtml = successHtml.replace('"<!-- REDIRECT_URL -->"', () => jsStringLiteral(callbackUrl));
           return res.type('html').send(successHtml);
         }
       } catch (e) {
@@ -1040,7 +1041,7 @@ export async function startRemoteServer(ctx) {
 
     // No session — redirect to login
     const oauthParams = Buffer.from(JSON.stringify({
-      client_id, redirect_uri, code_challenge, code_challenge_method, scope, state
+      client_id, redirect_uri: safeRedirectUri, code_challenge, code_challenge_method, scope, state
     })).toString('base64url');
     res.redirect(`/login?params=${oauthParams}`);
   });
@@ -1048,10 +1049,13 @@ export async function startRemoteServer(ctx) {
   // ── OAuth: Login Page ──
   app.get('/login', (req, res) => {
     const params = req.query.params || '';
+    if (!isSafeParams(params)) return res.status(400).type('text').send('Invalid params');
     const signupComplete = req.query.signup_complete;
     let html = readFileSync(join(__remoteDir, 'login.html'), 'utf8');
-    // Inject params into template
-    html = html.replace(/<!-- PARAMS -->/g, params);
+    // Inject params into template (validated above; escaped for defence in depth)
+    html = html
+      .replace(/\?params=<!-- PARAMS -->/g, () => '?params=' + escapeHtml(encodeURIComponent(params)))
+      .replace(/<!-- PARAMS -->/g, () => escapeHtml(params));
     if (signupComplete) {
       html = html.replace('<!-- SIGNUP_BANNER -->',
         '<div class="success-banner">Account created — sign in below to continue.</div>');
@@ -1100,16 +1104,19 @@ export async function startRemoteServer(ctx) {
 
   // ── Shared: build OAuth redirect URL from params ──────────────────────────
   function buildAuthorizeRedirect(sessionParam: string, params?: string): string {
-    if (!params) return `/oauth/authorize?session=${sessionParam}`;
+    if (!params) return `/oauth/authorize?session=${encodeURIComponent(sessionParam)}`;
     const oauthParams = JSON.parse(Buffer.from(params, 'base64url').toString());
-    let url = `/oauth/authorize?client_id=${oauthParams.client_id}`;
-    url += `&redirect_uri=${encodeURIComponent(oauthParams.redirect_uri)}`;
-    url += `&response_type=code&code_challenge=${oauthParams.code_challenge}`;
-    url += `&code_challenge_method=${oauthParams.code_challenge_method || 'S256'}`;
-    if (oauthParams.scope) url += `&scope=${oauthParams.scope}`;
-    if (oauthParams.state) url += `&state=${oauthParams.state}`;
-    url += `&session=${sessionParam}`;
-    return url;
+    const q = new URLSearchParams({
+      client_id: String(oauthParams.client_id ?? ''),
+      redirect_uri: String(oauthParams.redirect_uri ?? ''),
+      response_type: 'code',
+      code_challenge: String(oauthParams.code_challenge ?? ''),
+      code_challenge_method: String(oauthParams.code_challenge_method || 'S256'),
+    });
+    if (oauthParams.scope) q.set('scope', String(oauthParams.scope));
+    if (oauthParams.state) q.set('state', String(oauthParams.state));
+    q.set('session', sessionParam);
+    return `/oauth/authorize?${q.toString()}`;
   }
 
   // ── OAuth: Login Submit ──
@@ -1127,7 +1134,7 @@ export async function startRemoteServer(ctx) {
       });
       if (!authResp.ok) {
         const errParam = authResp.status === 429 ? 'rate_limit' : 'invalid_credentials';
-        const loginUrl = params ? `/login?params=${params}&error=${errParam}` : `/login?error=${errParam}`;
+        const loginUrl = params ? `/login?params=${encodeURIComponent(params)}&error=${errParam}` : `/login?error=${errParam}`;
         return res.redirect(loginUrl);
       }
       const authData = await authResp.json();
@@ -1160,20 +1167,20 @@ export async function startRemoteServer(ctx) {
         signal: AbortSignal.timeout(10000)
       });
       if (!regResp.ok) {
-        const loginUrl = params ? `/login?params=${params}` : '/login';
+        const loginUrl = params ? `/login?params=${encodeURIComponent(params)}` : '/login';
         return res.redirect(loginUrl);
       }
       const authData = await regResp.json();
       const jwt = authData.access_token;
       if (!jwt) {
-        const loginUrl = params ? `/login?params=${params}&signup_complete=1` : '/login?signup_complete=1';
+        const loginUrl = params ? `/login?params=${encodeURIComponent(params)}&signup_complete=1` : '/login?signup_complete=1';
         return res.redirect(loginUrl);
       }
 
       // Mint a long-lived API key — survives Render restarts and 4hr JWT expiry
       const longLivedKey = await mintOAuthApiKey(jwt);
       if (!longLivedKey) {
-        const loginUrl = params ? `/login?params=${params}&signup_complete=1` : '/login?signup_complete=1';
+        const loginUrl = params ? `/login?params=${encodeURIComponent(params)}&signup_complete=1` : '/login?signup_complete=1';
         return res.redirect(loginUrl);
       }
 
@@ -1203,14 +1210,45 @@ export async function startRemoteServer(ctx) {
     } catch { res.json({ exists: false }); }
   });
 
+  // ── Signed OAuth state ──
+  // The social-login round trip carries our MCP params in `state`. The in-memory
+  // oauthStateStorage is the primary record; the self-contained fallback (which
+  // survives a restart mid-login) used to be an unsigned blob anyone could mint,
+  // which allowed login-CSRF (binding a victim's client to an attacker's
+  // account). It is now HMAC-signed and time-limited. Key: MCP_INTERNAL_SECRET
+  // when set (polymath has it); otherwise a per-process random key, which keeps
+  // the old restart behaviour (in-flight logins re-authenticate).
+  const STATE_SECRET = process.env.MCP_INTERNAL_SECRET || randomBytes(32).toString('hex');
+  const STATE_MAX_AGE_MS = 10 * 60 * 1000;
+  function signState(obj) {
+    const payload = Buffer.from(JSON.stringify({ ...obj, iat: Date.now() })).toString('base64url');
+    const sig = createHmac('sha256', STATE_SECRET).update(payload).digest('base64url');
+    return `${payload}.${sig}`;
+  }
+  function verifyState(state) {
+    if (typeof state !== 'string' || state.length > 8192) return null;
+    const dot = state.lastIndexOf('.');
+    if (dot <= 0) return null;
+    const payload = state.slice(0, dot), sig = state.slice(dot + 1);
+    const expected = createHmac('sha256', STATE_SECRET).update(payload).digest('base64url');
+    const a = Buffer.from(sig), b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+    try {
+      const obj = JSON.parse(Buffer.from(payload, 'base64url').toString());
+      if (!obj || typeof obj.iat !== 'number' || Date.now() - obj.iat > STATE_MAX_AGE_MS) return null;
+      return obj;
+    } catch { return null; }
+  }
+
   // ── OAuth: Google Login ──
   app.get('/oauth/google/login', (req, res) => {
     const params = req.query.params || '';
+    if (!isSafeParams(params)) return res.status(400).type('text').send('Invalid params');
     const stateId = randomUUID();
     let statePayload = stateId;
     if (params) {
       oauthStateStorage[stateId] = { params, provider: 'google', createdAt: Date.now() };
-      statePayload = Buffer.from(JSON.stringify({ id: stateId, params, provider: 'google' })).toString('base64url');
+      statePayload = signState({ id: stateId, params, provider: 'google' });
     }
     const callbackUrl = `https://${req.get('host')}/oauth/callback`;
     res.redirect(`${API_URL}/api/v1/oauth/google/login?return_url=${callbackUrl}&state=${statePayload}`);
@@ -1219,11 +1257,12 @@ export async function startRemoteServer(ctx) {
   // ── OAuth: GitHub Login ──
   app.get('/oauth/github/login', (req, res) => {
     const params = req.query.params || '';
+    if (!isSafeParams(params)) return res.status(400).type('text').send('Invalid params');
     const stateId = randomUUID();
     let statePayload = stateId;
     if (params) {
       oauthStateStorage[stateId] = { params, provider: 'github', createdAt: Date.now() };
-      statePayload = Buffer.from(JSON.stringify({ id: stateId, params, provider: 'github' })).toString('base64url');
+      statePayload = signState({ id: stateId, params, provider: 'github' });
     }
     const callbackUrl = `https://${req.get('host')}/oauth/callback`;
     res.redirect(`${API_URL}/api/v1/oauth/github/login?return_url=${callbackUrl}&state=${statePayload}`);
@@ -1233,7 +1272,11 @@ export async function startRemoteServer(ctx) {
   app.get('/oauth/callback', async (req, res) => {
     try {
       const { token, refresh_token: callbackRefreshToken, state, error } = req.query;
-      if (error) return res.status(400).send(`OAuth failed: ${error}`);
+      if (error) {
+        // Provider error codes are plain tokens (access_denied …); echo only that shape, as text.
+        const safeError = String(error).replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 64) || 'unknown_error';
+        return res.status(400).type('text').send(`OAuth failed: ${safeError}`);
+      }
       if (!token || !state) return res.status(400).send('Missing token or state');
 
       // Recover MCP params from state
@@ -1242,14 +1285,12 @@ export async function startRemoteServer(ctx) {
         mcpParams = oauthStateStorage[state].params;
         delete oauthStateStorage[state];
       } else {
-        try {
-          const decoded = JSON.parse(Buffer.from(state, 'base64url').toString());
-          mcpParams = decoded.params;
-          if (decoded.id && oauthStateStorage[decoded.id]) delete oauthStateStorage[decoded.id];
-        } catch {
-          return res.status(400).send('Invalid or expired OAuth state');
-        }
+        const decoded = verifyState(state);
+        if (!decoded) return res.status(400).type('text').send('Invalid or expired OAuth state');
+        mcpParams = decoded.params;
+        if (decoded.id && oauthStateStorage[decoded.id]) delete oauthStateStorage[decoded.id];
       }
+      if (!isSafeParams(mcpParams)) return res.status(400).type('text').send('Invalid OAuth state');
       if (!mcpParams) return res.status(400).send('No MCP parameters found');
 
       // Decode MCP params
@@ -1269,22 +1310,25 @@ export async function startRemoteServer(ctx) {
         await saveRefreshToken(token, callbackRefreshToken);
       }
 
+      // redirect_uri was validated at /oauth/authorize, but the state blob that
+      // carried it here is client-supplied, so validate again before minting a code.
+      const callbackRedirectUri = validateRedirectUri(decodedParams.redirect_uri);
+      if (!callbackRedirectUri) return res.status(400).send('Invalid redirect_uri');
+
       // Generate MCP authorization code
       const authCode = generateCode();
       storeAuthCode({
         code: authCode, apiKey: token, clientId: decodedParams.client_id,
-        redirectUri: decodedParams.redirect_uri, codeChallenge: decodedParams.code_challenge,
+        redirectUri: callbackRedirectUri, codeChallenge: decodedParams.code_challenge,
         codeChallengeMethod: decodedParams.code_challenge_method || 'S256',
         refreshToken: callbackRefreshToken
       });
 
-      // Build redirect
-      let finalRedirect = decodedParams.redirect_uri + (decodedParams.redirect_uri.includes('?') ? '&' : '?') + `code=${authCode}`;
-      if (decodedParams.state) finalRedirect += `&state=${decodedParams.state}`;
+      const finalRedirect = buildCallbackUrl(callbackRedirectUri, authCode, decodedParams.state);
 
       // Return success page
       let successHtml = readFileSync(join(__remoteDir, 'success.html'), 'utf8');
-      successHtml = successHtml.replace('<!-- REDIRECT_URL -->', finalRedirect);
+      successHtml = successHtml.replace('"<!-- REDIRECT_URL -->"', () => jsStringLiteral(finalRedirect));
       res.type('html').send(successHtml);
     } catch (e) {
       structuredLog.error('OAuth callback error', { error: e.message });
@@ -1357,15 +1401,15 @@ export async function startRemoteServer(ctx) {
       status: 'running',
       endpoints: {
         mcp: `${serverUrl}/mcp`,
-        sse: `${serverUrl}/sse`,
         health: `${serverUrl}/health`,
         oauth_discovery: `${serverUrl}/.well-known/oauth-authorization-server`
       }
     });
   });
 
-  // Start
+  // Start. Tests pass ctx.listen === false and bind the returned app themselves.
   const PORT = parseInt(process.env.PORT || '8000', 10);
+  if (ctx.listen === false) return { app };
 
   resolveApiKey().then(apiKey => {
     resolvedApiKey = apiKey;
@@ -1380,11 +1424,9 @@ export async function startRemoteServer(ctx) {
         api_url: API_URL,
         api_key_configured: !!resolvedApiKey,
         tools_count: TOOLS.length,
-        transports: ['streamable-http', 'sse'],
+        transports: ['streamable-http'],
         endpoints: {
           mcp: '/mcp (Streamable HTTP — POST/GET/DELETE)',
-          sse: '/sse (deprecated SSE — GET)',
-          messages: '/messages (deprecated SSE — POST)',
           health: '/health'
         }
       });
@@ -1398,11 +1440,9 @@ export async function startRemoteServer(ctx) {
   process.on('SIGINT', async () => {
     structuredLog.info('Shutting down remote server...');
     clearInterval(sessionCleanupInterval);
+    clearInterval(oauthHousekeeping);
     connMonitor.stop();
-    for (const sid in transports) {
-      try { await transports[sid].close(); } catch {}
-      delete transports[sid];
-    }
+    mcpSessions.clear();
     process.exit(0);
   });
 } // end startRemoteServer
