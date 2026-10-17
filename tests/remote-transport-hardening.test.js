@@ -12,11 +12,17 @@ let base, srv;
 const realFetch = globalThis.fetch;
 const local = (path, init) => realFetch(base + path, { redirect: 'manual', ...init });
 
+let authMe = 'ok'; // 'ok' | 'reject' | 'down' | 'throw' — how the mocked backend answers /auth/me
 before(async () => {
   globalThis.fetch = async (url, init) => {
     const u = String(url);
     if (u.startsWith(base)) return realFetch(url, init);
-    if (u.endsWith('/api/v1/auth/me')) return { ok: true, status: 200, json: async () => ({ email: 'test@example.com' }), text: async () => '' };
+    if (u.endsWith('/api/v1/auth/me')) {
+      if (authMe === 'throw') throw new TypeError('fetch failed');
+      if (authMe === 'down') return { ok: false, status: 502, json: async () => ({}), text: async () => 'bad gateway' };
+      if (authMe === 'reject') return { ok: false, status: 401, json: async () => ({}), text: async () => '' };
+      return { ok: true, status: 200, json: async () => ({ email: 'test@example.com' }), text: async () => '' };
+    }
     return { ok: false, status: 503, json: async () => ({}), text: async () => '' };
   };
   const { startRemoteServer } = await import('../dist/remote/start.js');
@@ -137,6 +143,11 @@ describe('/oauth/callback', () => {
 
 describe('/oauth/authorize redirect handling', () => {
   const q = (o) => new URLSearchParams({ client_id: 'claude-test', code_challenge: 'abc', ...o }).toString();
+  it('refuses an https redirect_uri that is not an approved client host (the phishing path)', async () => {
+    const r = await local('/oauth/authorize?' + q({ redirect_uri: 'https://attacker.example/cb' }));
+    assert.equal(r.status, 400);
+    assert.match((await r.json()).error, /not an approved MCP client/);
+  });
   it('rejects javascript:, http-to-internet and relative redirect_uri', async () => {
     for (const bad of ['javascript:alert(1)', 'http://evil.example/cb', '/cb', 'data:text/html,x']) {
       const r = await local('/oauth/authorize?' + q({ redirect_uri: bad }));
@@ -181,5 +192,33 @@ describe('/oauth/authorize redirect handling', () => {
     assert.equal((await token.json()).access_token, 'pm_test_key');
     const replay = await local('/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grant_type: 'authorization_code', code, redirect_uri: redirect, code_verifier: verifier, client_id: 'claude-e2e' }) });
     assert.equal(replay.status, 400, 'codes are single use');
+  });
+});
+
+describe('token check when the backend is unreachable', () => {
+  const init = () => local('/mcp/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer pm_x' }, body: JSON.stringify({ jsonrpc: '2.0', id: 7, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '0' } } }) });
+  after(() => { authMe = 'ok'; });
+  it('answers 503 + Retry-After (not 401) when /auth/me throws or returns 5xx', async () => {
+    for (const mode of ['throw', 'down']) {
+      authMe = mode;
+      const r = await init();
+      assert.equal(r.status, 503, mode);
+      assert.equal(r.headers.get('retry-after'), '5');
+      const j = await r.json();
+      assert.equal(j.error.data.type, 'backend_unavailable');
+      assert.equal(j.id, 7);
+      const stream = await local('/mcp/messages', { headers: { Accept: 'text/event-stream', Authorization: 'Bearer pm_x' } });
+      assert.equal(stream.status, 503, `stream ${mode}`);
+    }
+  });
+  it('still answers 401 when the backend actually rejects the token', async () => {
+    authMe = 'reject';
+    const r = await init();
+    assert.equal(r.status, 401);
+    assert.ok(r.headers.get('www-authenticate'));
+  });
+  it('and 200 once the backend is back', async () => {
+    authMe = 'ok';
+    assert.equal((await init()).status, 200);
   });
 });

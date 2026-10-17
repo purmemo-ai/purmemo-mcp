@@ -8,7 +8,7 @@
 
 import { structuredLog } from '../lib/logger.js';
 import { apiCircuitBreaker, runWithApiKey } from '../lib/api-client.js';
-import { escapeHtml, isSafeParams, validateRedirectUri, buildCallbackUrl, jsStringLiteral } from './oauth-guards.js';
+import { escapeHtml, isSafeParams, validateRedirectUri, isAllowedRedirectTarget, buildCallbackUrl, jsStringLiteral } from './oauth-guards.js';
 import {
   handleSaveConversation,
   handleSaveArtifact,
@@ -200,7 +200,17 @@ export async function startRemoteServer(ctx) {
   }, 5 * 60 * 1000);
   sessionCleanupInterval.unref?.(); // housekeeping must never keep the process alive on its own
 
-  // Helper: validate API key from Authorization header
+  // Thrown when the token could not be CHECKED (backend down, timeout, 5xx),
+  // as opposed to checked and rejected. Callers answer 503 + Retry-After so a
+  // valid client retries instead of being told to re-authenticate. Before this,
+  // the first ~minute after a restart answered valid keys with 401.
+  class BackendUnavailableError extends Error {
+    constructor(message) { super(message || 'backend unavailable'); this.name = 'BackendUnavailableError'; }
+  }
+  const BACKEND_UNAVAILABLE_JSONRPC = { code: -32000, message: 'Backend temporarily unavailable, retry shortly', data: { type: 'backend_unavailable' } };
+
+  // Helper: validate API key from Authorization header.
+  // Returns the (possibly refreshed) key, null if rejected, throws BackendUnavailableError if unverifiable.
   async function validateApiKeyFromRequest(req) {
     const auth = req.headers.authorization;
     if (!auth || !auth.startsWith('Bearer ')) return null;
@@ -211,6 +221,7 @@ export async function startRemoteServer(ctx) {
         signal: AbortSignal.timeout(10000)
       });
       if (resp.ok) return token;
+      if (resp.status >= 500) throw new BackendUnavailableError(`auth/me ${resp.status}`);
       // Silent token refresh if 401 and we have a refresh token.
       // Cache MISS in-memory → fall back to durable DB store (survives restarts).
       if (resp.status === 401) {
@@ -250,7 +261,10 @@ export async function startRemoteServer(ctx) {
         }
       }
       return null;
-    } catch { return null; }
+    } catch (e) {
+      if (e instanceof BackendUnavailableError) throw e;
+      throw new BackendUnavailableError(e?.message || 'auth/me unreachable');
+    }
   }
 
   // Helper: SSE response
@@ -707,6 +721,11 @@ export async function startRemoteServer(ctx) {
       return sendJSON(res, { jsonrpc: '2.0', id: requestId, error: { code: -32601, message: `Method not found: ${method}` } });
 
     } catch (error) {
+      if (error instanceof BackendUnavailableError) {
+        structuredLog.warn('Token check skipped: backend unavailable', { error: error.message });
+        if (!res.headersSent) return sendJSON(res, { jsonrpc: '2.0', id: req.body?.id ?? null, error: BACKEND_UNAVAILABLE_JSONRPC }, 503, { 'Retry-After': '5' });
+        return;
+      }
       structuredLog.error('Error in /mcp/messages', { error: error.message });
       reportIncident(error.message, { component: 'mcp-messages-handler' });
       if (!res.headersSent) {
@@ -720,7 +739,12 @@ export async function startRemoteServer(ctx) {
     if (!req.headers.accept?.includes('text/event-stream')) {
       return res.status(406).json({ error: 'Must accept text/event-stream' });
     }
-    const apiKey = await validateApiKeyFromRequest(req);
+    let apiKey;
+    try { apiKey = await validateApiKeyFromRequest(req); }
+    catch (e) {
+      if (e instanceof BackendUnavailableError) return res.status(503).set('Retry-After', '5').json({ error: 'Backend temporarily unavailable, retry shortly' });
+      throw e;
+    }
     if (!apiKey) return res.status(401).json({ error: 'Authentication required' });
 
     const sessionId = req.headers['mcp-session-id'] || randomUUID();
@@ -1011,6 +1035,10 @@ export async function startRemoteServer(ctx) {
     if (!redirect_uri) return res.status(400).json({ error: 'Missing redirect_uri' });
     const safeRedirectUri = validateRedirectUri(redirect_uri);
     if (!safeRedirectUri) return res.status(400).json({ error: 'Invalid redirect_uri: must be an absolute https URL (http is allowed for localhost only)' });
+    if (!isAllowedRedirectTarget(safeRedirectUri)) {
+      structuredLog.warn('OAuth redirect_uri host not allowlisted', { host: new URL(safeRedirectUri).hostname, client_id: String(client_id).slice(0, 40) });
+      return res.status(400).json({ error: 'redirect_uri host is not an approved MCP client. If you are building a client, email support@purmemo.ai with the host to allowlist.' });
+    }
     if (!code_challenge) return res.status(400).json({ error: 'Missing code_challenge (PKCE required)' });
 
     // If we have a session (base64-encoded API key), complete the flow
@@ -1313,7 +1341,7 @@ export async function startRemoteServer(ctx) {
       // redirect_uri was validated at /oauth/authorize, but the state blob that
       // carried it here is client-supplied, so validate again before minting a code.
       const callbackRedirectUri = validateRedirectUri(decodedParams.redirect_uri);
-      if (!callbackRedirectUri) return res.status(400).send('Invalid redirect_uri');
+      if (!callbackRedirectUri || !isAllowedRedirectTarget(callbackRedirectUri)) return res.status(400).type('text').send('Invalid redirect_uri');
 
       // Generate MCP authorization code
       const authCode = generateCode();

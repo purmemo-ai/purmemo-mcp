@@ -79,3 +79,41 @@ export function jsStringLiteral(value: string): string {
     .split(LS).join('\\u2028')
     .split(PS).join('\\u2029');
 }
+
+/**
+ * OAuth redirect host allowlist (RFC 6749 §3.1.2.2 by other means).
+ *
+ * /oauth/register is stateless, so we cannot compare redirect_uri with a
+ * registered value. Instead, https redirects are limited to the MCP clients
+ * we actually serve, plus anything the operator adds via
+ * PURMEMO_OAUTH_REDIRECT_ALLOW (comma-separated hosts; subdomains match).
+ * Loopback http and private-use app schemes (native editors) are always
+ * allowed — they cannot be reached by a third party.
+ */
+export const DEFAULT_REDIRECT_HOSTS = [
+  'claude.ai', 'claude.com', 'anthropic.com',
+  'chatgpt.com', 'openai.com', 'chat.openai.com', 'platform.openai.com',
+  'figma.com',
+  'gemini.google.com',
+  'cursor.com', 'cursor.sh', 'vscode.dev', 'github.dev',
+  'purmemo.ai',
+];
+
+function hostMatches(host: string, allowed: string): boolean {
+  const h = host.toLowerCase(), a = allowed.toLowerCase().trim();
+  return a.length > 0 && (h === a || h.endsWith('.' + a));
+}
+
+export function extraRedirectHosts(env: Record<string, string | undefined> = process.env): string[] {
+  return String(env.PURMEMO_OAUTH_REDIRECT_ALLOW || '').split(',').map((h) => h.trim()).filter(Boolean);
+}
+
+/** True when a redirect_uri that already passed validateRedirectUri may receive an authorization code. */
+export function isAllowedRedirectTarget(value: string, env: Record<string, string | undefined> = process.env): boolean {
+  let url: URL;
+  try { url = new URL(value); } catch { return false; }
+  if (url.protocol === 'http:') return LOOPBACK_HOSTS.has(url.hostname.toLowerCase()); // loopback only (validateRedirectUri enforces)
+  if (url.protocol !== 'https:') return true; // private-use app scheme, already screened
+  const allowed = [...DEFAULT_REDIRECT_HOSTS, ...extraRedirectHosts(env)];
+  return allowed.some((a) => hostMatches(url.hostname, a));
+}
