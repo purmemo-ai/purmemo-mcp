@@ -39,6 +39,7 @@ export class ConnectionMonitor {
 
   start(): void {
     this._monitorInterval = setInterval(() => this._checkAlerts(), 30000);
+    this._monitorInterval.unref?.();
   }
 
   stop(): void {
