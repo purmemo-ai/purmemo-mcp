@@ -4,11 +4,6 @@ import assert from 'node:assert';
 import TokenStore from '../dist/auth/token-store.js';
 
 describe('TokenStore', () => {
-    it('initializes correctly', () => {
-        const store = new TokenStore();
-        assert.ok(store);
-    });
-
     it('can encrypt and decrypt correctly', () => {
       const store = new TokenStore();
       const data = { user: { id: "test", email: "test@example.com" } };

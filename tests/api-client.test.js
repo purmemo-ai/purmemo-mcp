@@ -69,8 +69,9 @@ describe('api-client', () => {
            }
        });
 
-       it('circuit breaker functionality', async () => {
-          assert.ok(apiCircuitBreaker);
+       it('circuit breaker exposes its state and failure count', async () => {
+          assert.ok(['CLOSED', 'OPEN', 'HALF_OPEN'].includes(apiCircuitBreaker.state), apiCircuitBreaker.state);
+          assert.strictEqual(typeof apiCircuitBreaker.failureCount, 'number');
        });
    });
 });
