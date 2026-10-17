@@ -1,9 +1,13 @@
 name: Deploy to polymathematics
 
+# Deploys only tagged releases: release.yml dispatches this after the version-bump
+# PR has merged (so main == the tag), and a release published by hand triggers it too.
+# Since 2026-10-17 it no longer runs on every push to main — the server, npm and the
+# tag always move together.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+  release:
+    types: [published]
 
 concurrency:
   group: poly-deploy

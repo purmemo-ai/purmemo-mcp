@@ -1,0 +1,133 @@
+name: Release on merge
+
+# Merging code to main IS the release. Nobody bumps versions or clicks "publish" by hand.
+#
+#   1. bump the patch version on a release/vX.Y.Z branch and open a PR
+#   2. run the required `test` check on that branch and let auto-merge land it
+#   3. tag the merged commit and create the GitHub release
+#   4. dispatch publish.yml (npm, trusted publishing) and deploy-polymathematics.yml
+#
+# No personal token anywhere: GITHUB_TOKEN can open PRs (repo setting "allow Actions to
+# create PRs" is on), dispatch workflows, push tags and create releases. Events caused by
+# GITHUB_TOKEN never start other workflows, which is why steps 2-4 dispatch explicitly
+# instead of relying on push/release triggers — and why the bump commit cannot loop.
+#
+# Added 2026-10-17 after a hardening fix reached the live server but not npm, and a
+# laptop checkout kept running an older build: four copies, one updated by a machine.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'bundle/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'server.json'
+      - 'tsconfig.json'
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'semver part to bump'
+        type: choice
+        default: patch
+        options: [patch, minor, major]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  release:
+    # the version-bump commit must never start another release
+    if: "${{ github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore: release v') }}"
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Compute next version
+        id: ver
+        run: |
+          set -euo pipefail
+          BUMP="${{ github.event.inputs.bump || 'patch' }}"
+          CUR=$(node -p "require('./package.json').version")
+          NEXT=$(node -e "const [a,b,c]='$CUR'.split('.').map(Number); const m={patch:[a,b,c+1],minor:[a,b+1,0],major:[a+1,0,0]}['$BUMP']; console.log(m.join('.'))")
+          if git rev-parse -q --verify "refs/tags/v$NEXT" >/dev/null; then echo "::error::tag v$NEXT already exists"; exit 1; fi
+          echo "current=$CUR" >> "$GITHUB_OUTPUT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "next version: $NEXT (from $CUR, $BUMP)"
+
+      - name: Open the version-bump PR and arm auto-merge
+        id: pr
+        run: |
+          set -euo pipefail
+          NEXT="${{ steps.ver.outputs.next }}"; BR="release/v$NEXT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BR"
+          npm version "$NEXT" --no-git-tag-version
+          git add package.json package-lock.json
+          git commit -m "chore: release v$NEXT"
+          git push -u origin "$BR"
+          gh pr create --base main --head "$BR" --title "chore: release v$NEXT" \
+            --body "Automatic release after the merge of ${{ github.sha }}. Merging this tags v$NEXT, publishes to npm and deploys mcp.purmemo.ai. Opened by release.yml."
+          echo "branch=$BR" >> "$GITHUB_OUTPUT"
+          # A PR opened with GITHUB_TOKEN does not start pull_request workflows, so run the
+          # required check explicitly on the branch head; it attaches to the same commit.
+          gh workflow run test.yml --ref "$BR"
+          gh pr merge "$BR" --auto --squash
+
+      - name: Wait for the bump PR to merge
+        id: merged
+        run: |
+          set -euo pipefail
+          BR="${{ steps.pr.outputs.branch }}"
+          for i in $(seq 1 60); do
+            STATE=$(gh pr view "$BR" --json state,mergeCommit -q '.state + " " + (.mergeCommit.oid // "")')
+            case "$STATE" in
+              MERGED*) SHA="${STATE#MERGED }"; echo "sha=$SHA" >> "$GITHUB_OUTPUT"; echo "merged as $SHA"; exit 0 ;;
+              CLOSED*) echo "::error::bump PR was closed without merging"; exit 1 ;;
+            esac
+            sleep 15
+          done
+          echo "::error::bump PR did not merge within 15 min — is the test check green and the branch up to date with main?"
+          exit 1
+
+      - name: Tag, release, publish, deploy
+        run: |
+          set -euo pipefail
+          NEXT="${{ steps.ver.outputs.next }}"; SHA="${{ steps.merged.outputs.sha }}"
+          git fetch origin main --quiet
+          git tag -a "v$NEXT" "$SHA" -m "v$NEXT"
+          git push origin "v$NEXT"
+          gh release create "v$NEXT" --target "$SHA" --title "v$NEXT" --generate-notes
+          gh workflow run publish.yml --ref "v$NEXT" -f tag="v$NEXT"
+          gh workflow run deploy-polymathematics.yml --ref main
+          echo "released v$NEXT — npm publish and polymath deploy dispatched"
+
+      - name: Alert on failure
+        if: failure()
+        continue-on-error: true
+        env:
+          POLY_SSH_KEY: ${{ secrets.POLY_SSH_KEY }}
+          POLY_HOST: ${{ secrets.POLY_HOST }}
+          POLY_USER: ${{ secrets.POLY_USER }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$POLY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$POLY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -o ConnectTimeout=10 -i ~/.ssh/id_ed25519 "$POLY_USER@$POLY_HOST" \
+            "/usr/local/bin/poly-slack.sh '🔴 [purmemo-mcp] release workflow FAILED (run ${{ github.run_id }}, sha ${{ github.sha }}). main may hold unreleased code — check the Actions log.'" || true

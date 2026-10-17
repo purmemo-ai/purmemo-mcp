@@ -1,8 +1,17 @@
 name: Publish to npm
 
+# Runs on a published release (manual path) or when release.yml dispatches it with
+# the tag it just created (automatic path — GITHUB_TOKEN-created releases do not fire
+# the release event, so release.yml calls this explicitly).
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'release tag to publish (e.g. v15.7.32)'
+        required: true
+        type: string
 
 jobs:
   publish:
@@ -13,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       # Node 22+: npm@latest (>= 12) refuses to install on Node 20 (EBADENGINE),
       # and trusted publishing needs npm >= 11.5.1.
@@ -46,14 +57,9 @@ jobs:
           node scripts/build-mcpb.js
 
       - name: Upload .mcpb to GitHub Release
-        uses: actions/upload-release-asset@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./purmemo-mcp.mcpb
-          asset_name: purmemo-mcp.mcpb
-          asset_content_type: application/octet-stream
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ inputs.tag || github.event.release.tag_name }}" ./purmemo-mcp.mcpb --clobber
 
       # Remote MCP redeploy: NOT here. The remote endpoint (mcp.purmemo.ai)
       # lives on the polymathematics OCI VM and auto-deploys on every push to
