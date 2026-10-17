@@ -89,6 +89,43 @@ describe('/login reflects nothing it did not mint', () => {
   });
 });
 
+describe('/mcp advertised path', () => {
+  it('GET /mcp reaches the real stream handler (401 without auth, not 404)', async () => {
+    const r = await local('/mcp', { headers: { Accept: 'text/event-stream' } });
+    assert.equal(r.status, 401);
+  });
+  it('DELETE /mcp reaches the real session handler (400 without a session id, not 404)', async () => {
+    const r = await local('/mcp', { method: 'DELETE' });
+    assert.equal(r.status, 400);
+  });
+});
+
+describe('signed OAuth state', () => {
+  const params = Buffer.from(JSON.stringify({ client_id: 'c', redirect_uri: 'https://claude.ai/cb', code_challenge: 'x', code_challenge_method: 'S256' })).toString('base64');
+  const stateFromLogin = async () => {
+    const r = await local('/oauth/google/login?params=' + encodeURIComponent(params));
+    assert.equal(r.status, 302);
+    return new URL(r.headers.get('location')).searchParams.get('state');
+  };
+  it('a state minted by our login redirect completes the callback', async () => {
+    const state = await stateFromLogin();
+    assert.match(state, /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/, 'payload.signature');
+    const r = await local('/oauth/callback?' + new URLSearchParams({ token: 'pm_test_key', state }));
+    assert.equal(r.status, 200);
+    assert.ok((await r.text()).includes('window.location.href = "https://claude.ai/cb?code=code_'));
+  });
+  it('a tampered or self-minted state is refused', async () => {
+    const state = await stateFromLogin();
+    const [payload, sig] = state.split('.');
+    const tampered = payload.slice(0, -2) + (payload.endsWith('A') ? 'BB' : 'AA') + '.' + sig;
+    for (const bad of [tampered, payload, payload + '.' + 'x'.repeat(43),
+      Buffer.from(JSON.stringify({ id: 'evil', params, provider: 'google' })).toString('base64url')]) {
+      const r = await local('/oauth/callback?' + new URLSearchParams({ token: 'pm_test_key', state: bad }));
+      assert.equal(r.status, 400, `expected 400 for ${bad.slice(0, 20)}…`);
+    }
+  });
+});
+
 describe('/oauth/callback', () => {
   it('reflects a provider error as plain text, never HTML', async () => {
     const r = await local('/oauth/callback?error=' + encodeURIComponent('<script>alert(1)</script>'));

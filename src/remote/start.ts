@@ -68,7 +68,7 @@ export async function startRemoteServer(ctx) {
   // REMOTE MODE — Express + Streamable HTTP + SSE (replaces Python server)
   // ========================================================================
   const { default: express } = await import('express');
-  const { randomUUID } = await import('node:crypto');
+  const { randomUUID, randomBytes, createHmac, timingSafeEqual } = await import('node:crypto');
 
   const app = express();
   app.use(express.json());
@@ -777,6 +777,16 @@ export async function startRemoteServer(ctx) {
     req.url = '/mcp/messages';
     return app._router.handle(req, res, () => res.status(404).end());
   });
+  // GET (SSE keepalive stream) and DELETE (session end) on the advertised /mcp
+  // path too, so a client that only knows /mcp gets the real handlers, not 404.
+  app.get('/mcp', async (req, res) => {
+    req.url = '/mcp/messages';
+    return app._router.handle(req, res, () => res.status(404).end());
+  });
+  app.delete('/mcp', (req, res) => {
+    req.url = '/mcp/messages';
+    return app._router.handle(req, res, () => res.status(404).end());
+  });
 
   // ── /figma — Figma Make endpoint (header auth only, no OAuth discovery) ──
   // Figma Make auto-discovers OAuth from /.well-known and opens a broken OAuth popup.
@@ -1200,6 +1210,36 @@ export async function startRemoteServer(ctx) {
     } catch { res.json({ exists: false }); }
   });
 
+  // ── Signed OAuth state ──
+  // The social-login round trip carries our MCP params in `state`. The in-memory
+  // oauthStateStorage is the primary record; the self-contained fallback (which
+  // survives a restart mid-login) used to be an unsigned blob anyone could mint,
+  // which allowed login-CSRF (binding a victim's client to an attacker's
+  // account). It is now HMAC-signed and time-limited. Key: MCP_INTERNAL_SECRET
+  // when set (polymath has it); otherwise a per-process random key, which keeps
+  // the old restart behaviour (in-flight logins re-authenticate).
+  const STATE_SECRET = process.env.MCP_INTERNAL_SECRET || randomBytes(32).toString('hex');
+  const STATE_MAX_AGE_MS = 10 * 60 * 1000;
+  function signState(obj) {
+    const payload = Buffer.from(JSON.stringify({ ...obj, iat: Date.now() })).toString('base64url');
+    const sig = createHmac('sha256', STATE_SECRET).update(payload).digest('base64url');
+    return `${payload}.${sig}`;
+  }
+  function verifyState(state) {
+    if (typeof state !== 'string' || state.length > 8192) return null;
+    const dot = state.lastIndexOf('.');
+    if (dot <= 0) return null;
+    const payload = state.slice(0, dot), sig = state.slice(dot + 1);
+    const expected = createHmac('sha256', STATE_SECRET).update(payload).digest('base64url');
+    const a = Buffer.from(sig), b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+    try {
+      const obj = JSON.parse(Buffer.from(payload, 'base64url').toString());
+      if (!obj || typeof obj.iat !== 'number' || Date.now() - obj.iat > STATE_MAX_AGE_MS) return null;
+      return obj;
+    } catch { return null; }
+  }
+
   // ── OAuth: Google Login ──
   app.get('/oauth/google/login', (req, res) => {
     const params = req.query.params || '';
@@ -1208,7 +1248,7 @@ export async function startRemoteServer(ctx) {
     let statePayload = stateId;
     if (params) {
       oauthStateStorage[stateId] = { params, provider: 'google', createdAt: Date.now() };
-      statePayload = Buffer.from(JSON.stringify({ id: stateId, params, provider: 'google' })).toString('base64url');
+      statePayload = signState({ id: stateId, params, provider: 'google' });
     }
     const callbackUrl = `https://${req.get('host')}/oauth/callback`;
     res.redirect(`${API_URL}/api/v1/oauth/google/login?return_url=${callbackUrl}&state=${statePayload}`);
@@ -1222,7 +1262,7 @@ export async function startRemoteServer(ctx) {
     let statePayload = stateId;
     if (params) {
       oauthStateStorage[stateId] = { params, provider: 'github', createdAt: Date.now() };
-      statePayload = Buffer.from(JSON.stringify({ id: stateId, params, provider: 'github' })).toString('base64url');
+      statePayload = signState({ id: stateId, params, provider: 'github' });
     }
     const callbackUrl = `https://${req.get('host')}/oauth/callback`;
     res.redirect(`${API_URL}/api/v1/oauth/github/login?return_url=${callbackUrl}&state=${statePayload}`);
@@ -1245,14 +1285,12 @@ export async function startRemoteServer(ctx) {
         mcpParams = oauthStateStorage[state].params;
         delete oauthStateStorage[state];
       } else {
-        try {
-          const decoded = JSON.parse(Buffer.from(state, 'base64url').toString());
-          mcpParams = decoded.params;
-          if (decoded.id && oauthStateStorage[decoded.id]) delete oauthStateStorage[decoded.id];
-        } catch {
-          return res.status(400).send('Invalid or expired OAuth state');
-        }
+        const decoded = verifyState(state);
+        if (!decoded) return res.status(400).type('text').send('Invalid or expired OAuth state');
+        mcpParams = decoded.params;
+        if (decoded.id && oauthStateStorage[decoded.id]) delete oauthStateStorage[decoded.id];
       }
+      if (!isSafeParams(mcpParams)) return res.status(400).type('text').send('Invalid OAuth state');
       if (!mcpParams) return res.status(400).send('No MCP parameters found');
 
       // Decode MCP params
