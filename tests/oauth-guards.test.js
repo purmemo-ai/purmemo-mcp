@@ -6,7 +6,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import {
-  escapeHtml, isSafeParams, validateRedirectUri, buildCallbackUrl, jsStringLiteral
+  escapeHtml, isSafeParams, validateRedirectUri, buildCallbackUrl, jsStringLiteral, isAllowedRedirectTarget, DEFAULT_REDIRECT_HOSTS
 } from '../dist/remote/oauth-guards.js';
 
 describe('isSafeParams', () => {
@@ -69,5 +69,24 @@ describe('buildCallbackUrl + jsStringLiteral', () => {
     const out = page.replace('"<!-- REDIRECT_URL -->"', () => lit);
     assert.equal(out.split('<script>').length, 2, 'no second <script> appeared');
     assert.ok(!out.includes('tail</p>");'), "$' did not splice the page tail into the literal");
+  });
+});
+
+describe('isAllowedRedirectTarget', () => {
+  it('allows the clients we serve, their subdomains, loopback and app schemes', () => {
+    for (const ok of ['https://claude.ai/api/mcp/auth_callback', 'https://www.figma.com/cb', 'https://chatgpt.com/connector_platform_oauth_redirect',
+      'https://app.purmemo.ai/cb', 'http://localhost:6274/cb', 'http://127.0.0.1:3000/cb', 'cursor://anysphere.cursor-retrieval/oauth/cb', 'vscode://ms.mcp/cb'])
+      assert.equal(isAllowedRedirectTarget(ok, {}), true, ok);
+    assert.ok(DEFAULT_REDIRECT_HOSTS.includes('claude.ai'));
+  });
+  it('refuses unknown https hosts and look-alikes', () => {
+    for (const bad of ['https://evil.example/cb', 'https://claude.ai.evil.example/cb', 'https://notclaude.ai/cb', 'https://claude.ai@evil.example/cb', 'http://evil.example/cb'])
+      assert.equal(isAllowedRedirectTarget(bad, {}), false, bad);
+  });
+  it('operator can extend the list by env, subdomains included', () => {
+    const env = { PURMEMO_OAUTH_REDIRECT_ALLOW: 'partner.example, other.test' };
+    assert.equal(isAllowedRedirectTarget('https://partner.example/cb', env), true);
+    assert.equal(isAllowedRedirectTarget('https://app.other.test/cb', env), true);
+    assert.equal(isAllowedRedirectTarget('https://evil.example/cb', env), false);
   });
 });
