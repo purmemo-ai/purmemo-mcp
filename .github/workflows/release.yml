@@ -3,13 +3,13 @@ name: Release on merge
 # Merging code to main IS the release. Nobody bumps versions or clicks "publish" by hand.
 #
 #   1. bump the patch version on a release/vX.Y.Z branch and open a PR
-#   2. run the required `test` check on that branch and let auto-merge land it
+#   2. the PR's required `test` check runs and auto-merge lands it
 #   3. tag the merged commit and create the GitHub release
 #   4. dispatch publish.yml (npm, trusted publishing) and deploy-polymathematics.yml
 #
 # No personal token anywhere: GITHUB_TOKEN can open PRs (repo setting "allow Actions to
 # create PRs" is on), dispatch workflows, push tags and create releases. Events caused by
-# GITHUB_TOKEN never start other workflows, which is why steps 2-4 dispatch explicitly
+# GITHUB_TOKEN never start other workflows, which is why steps 3-4 dispatch explicitly
 # instead of relying on push/release triggers — and why the bump commit cannot loop.
 #
 # Added 2026-10-17 after a hardening fix reached the live server but not npm, and a
@@ -84,9 +84,9 @@ jobs:
           gh pr create --base main --head "$BR" --title "chore: release v$NEXT" \
             --body "Automatic release after the merge of ${{ github.sha }}. Merging this tags v$NEXT, publishes to npm and deploys mcp.purmemo.ai. Opened by release.yml."
           echo "branch=$BR" >> "$GITHUB_OUTPUT"
-          # A PR opened with GITHUB_TOKEN does not start pull_request workflows, so run the
-          # required check explicitly on the branch head; it attaches to the same commit.
-          gh workflow run test.yml --ref "$BR"
+          # The PR's own `test` run is the required check. (First run 2026-10-17: it was held
+          # for approval under the "first_time_contributors" policy; the repo now uses
+          # "first_time_contributors_new_to_github", so the bot's PRs run unattended.)
           gh pr merge "$BR" --auto --squash
 
       - name: Wait for the bump PR to merge
