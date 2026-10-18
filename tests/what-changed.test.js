@@ -5,7 +5,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { formatWhatChanged } from '../dist/tools/handlers.js';
+import { formatWhatChanged, nextBaseUrl } from '../dist/tools/handlers.js';
 
 const dossier = {
   entity: { id: 'e1', canonical_name: 'purmemo-next' },
@@ -35,5 +35,17 @@ describe('formatWhatChanged', () => {
   it('is honest when nothing has been superseded', () => {
     const t = formatWhatChanged({ canonical_name: 'x' }, { entity: { id: 'e', canonical_name: 'x' }, members: [], claim_count: 3, history_count: 0, contradiction_count: 0, history: [], contradictions: [] });
     assert.match(t, /No superseded facts on record yet/);
+  });
+});
+
+describe('nextBaseUrl', () => {
+  it('defaults to the public next address (the old localhost:3210 default answered nowhere)', () => {
+    assert.equal(nextBaseUrl({}), 'https://next.purmemo.ai');
+    assert.equal(nextBaseUrl({ PURMEMO_SHADOW_DOOR_URL: 'http://host:3210/save' }), 'https://next.purmemo.ai');
+  });
+  it('PURMEMO_NEXT_URL wins, then the read base, then the sessions URL; trailing slashes trimmed', () => {
+    assert.equal(nextBaseUrl({ PURMEMO_NEXT_URL: 'http://n:1/', PURMEMO_READ_BASE_URL: 'http://r:2' }), 'http://n:1');
+    assert.equal(nextBaseUrl({ PURMEMO_READ_BASE_URL: 'http://127.0.0.1:3211/' }), 'http://127.0.0.1:3211');
+    assert.equal(nextBaseUrl({ PURMEMO_SESSIONS_URL: 'https://s.example' }), 'https://s.example');
   });
 });
