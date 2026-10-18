@@ -173,7 +173,11 @@ Restart Claude Desktop after saving.
 
 Looking for the technical stuff? It's all here:
 
-- **[Tools, resources, prompts reference](docs/REFERENCE.md)** — every MCP tool the server exposes (`save_conversation`, `recall_memories`, `commit`, `snapshot`, `run_workflow`, etc.)
+- **Tools listed by default** — five: `save_conversation`, `recall_memories`, `get_memory_details`, `what_changed`, `get_user_context`. A short list helps the assistant pick the right tool. Env flags add more:
+  - `PURMEMO_SESSIONS_BETA=1` — adds `search_past_sessions` (beta): searches the raw transcripts of your past AI sessions for what was actually said or decided. Served by purmemo-next at `PURMEMO_READ_BASE_URL`, else `PURMEMO_SESSIONS_URL`, else `https://next.purmemo.ai`.
+  - `PURMEMO_ADMIN=1` — adds the admin tools (`get_acknowledged_errors`, `save_investigation_result`, `get_investigations`).
+  - `PURMEMO_LEGACY_TOOLS=1` — brings back the paused tools (`save_artifact`, `commit`, the snapshot tools, `list_clusters`, `discover_related_conversations`, `run_workflow`, `list_workflows`, sharing, tasks, test results and the rest). Called while paused, they answer with what to use instead.
+- **[Tools, resources, prompts reference](docs/REFERENCE.md)** — every MCP tool the server can expose, including the paused ones.
 - **[Living document semantics](docs/LIVING_DOCUMENTS.md)** — `mode='append'` vs `mode='replace'`, chunking behavior, ADR-036/038 details.
 - **[Identity layer](docs/IDENTITY.md)** — the cognitive fingerprint that loads into every session.
 - **[Architecture decisions (ADRs)](docs/adr/)** — every design decision, with context and trade-offs.

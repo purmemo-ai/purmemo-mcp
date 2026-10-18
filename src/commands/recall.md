@@ -30,4 +30,5 @@ Call `recall_memories` with the user's query. Present results clearly.
 
 ### Tips
 - If results aren't relevant, try different keywords or use entity filter
-- Use `discover_related_conversations` to find cross-platform connections (ChatGPT + Claude + Gemini)
+- Results already span every platform (ChatGPT, Claude, Gemini); search again with the names a result mentions to follow a thread
+- If recall comes up thin, or the user wants what was actually said in a past session, use `search_past_sessions` if it is available (beta)

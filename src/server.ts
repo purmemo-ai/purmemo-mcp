@@ -99,6 +99,8 @@ import {
   handleAcceptSnapshot
 } from './tools/handlers.js';
 import { handleGenerateHandoffBrief } from './tools/handoff.js';
+import { handleSearchPastSessions } from './tools/sessions.js';
+import { visibleTools, hiddenToolResult, toolFlags } from './lib/tool-visibility.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
@@ -279,9 +281,10 @@ initApiClient({
   platform: PLATFORM,
 });
 
-// Admin mode: enables get_acknowledged_errors + save_investigation_result
-// Only enabled when PURMEMO_ADMIN=1 is set in the environment.
+// Admin mode: lists + enables get_acknowledged_errors, save_investigation_result,
+// get_investigations. Only enabled when PURMEMO_ADMIN=1 is set in the environment.
 // Never set by default — npm package users never see these tools.
+// Which tools are listed at all is decided in lib/tool-visibility.ts.
 const ADMIN_MODE = process.env.PURMEMO_ADMIN === '1';
 
 // Log detected platform for debugging (only in development)
@@ -962,6 +965,25 @@ EXAMPLE USAGE:
       required: []
     }
   },
+  {
+    name: 'search_past_sessions',
+    annotations: {
+      title: 'Search Past Sessions',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    },
+    description: `Searches the raw transcripts of your past AI sessions (what was actually said, decisions made in the moment). Use it when recall_memories comes up thin, when it says past sessions also match, or when the user asks what exactly was said or decided in a session. Results give session date, machine, project and a window of the conversation, with an id that get_memory_details can open.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'What to look for in past sessions (words, a topic, or the decision you are trying to find).' },
+        limit: { type: 'integer', default: 6, maximum: 12, description: 'Maximum number of session windows to return (default 6, max 12).' }
+      },
+      required: ['query']
+    }
+  },
   // ============================================================================
   // WORKFLOW ENGINE TOOLS
   // ============================================================================
@@ -1619,11 +1641,31 @@ RETURNS:
   }
 ];
 
-const server = new Server(
-  { name: 'purmemo-mcp', version: CLIENT_VERSION },
-  {
-    capabilities: { tools: {}, resources: {}, prompts: {} },
-    instructions: `Purmemo is a cross-platform AI conversation memory system. Use these tools to save, search, and discover conversations across ChatGPT, Claude, Gemini, and other platforms.
+// What tools/list returns for this process (core by default; env flags add groups).
+const VISIBLE_TOOLS = visibleTools(TOOLS);
+const TOOL_FLAGS = toolFlags();
+
+const CORE_INSTRUCTIONS = `Purmemo is a cross-platform AI conversation memory system. Use these tools to save and search conversations across ChatGPT, Claude, Gemini, and other platforms.
+
+CORE WORKFLOW:
+1. save_conversation — Save COMPLETE conversations as memory. Same title (or conversationId) targets the existing memory. The 'mode' parameter controls update behavior: mode='replace' (default) overwrites; mode='append' concatenates with a timestamped separator. The /save skill sets mode='append' automatically. Include every message verbatim (minimum 500 chars, expect thousands). Server auto-chunks content >15K chars and forwards mode to each chunk.
+2. recall_memories — Search memories with semantic ranking. Use Phase 2 filters (entity, has_observations, initiative, intent) for precision. Default hybrid search covers most cases.
+3. get_memory_details — Retrieve full memory content including all linked chunks for multi-part conversations.
+4. what_changed — What facts about a project, machine or person were true and then replaced, with dates.
+5. get_user_context — Who the user is and what they are working on; call at the start of a session.${TOOL_FLAGS.beta ? `
+6. search_past_sessions — Search the raw transcripts of past sessions for what was actually said or decided.` : ''}
+
+KEY PATTERNS:
+- Update semantics: Same title = targets the existing memory. mode='replace' overwrites; mode='append' adds a timestamped section below prior content. Pick based on whether you want history visible inline.
+- Intelligent Extraction: save_conversation auto-extracts project context, technologies, status, and generates smart titles.
+- Quality Filtering: Use has_observations=true to find substantial technical discussions; entity="name" for specific topics.
+
+BEST PRACTICES:
+- Always send complete conversation content when saving — never summaries or partial content.
+- Use recall_memories before saving to check if a living document already exists for the topic.
+- For "save progress" requests, the system auto-generates contextual titles from conversation content.`;
+
+const LEGACY_INSTRUCTIONS = `Purmemo is a cross-platform AI conversation memory system. Use these tools to save, search, and discover conversations across ChatGPT, Claude, Gemini, and other platforms.
 
 CORE WORKFLOW:
 1. save_conversation — Save COMPLETE conversations as memory. Same title (or conversationId) targets the existing memory. The 'mode' parameter controls update behavior: mode='replace' (default) overwrites; mode='append' concatenates with a timestamped separator. The /save skill sets mode='append' automatically. Include every message verbatim (minimum 500 chars, expect thousands). Server auto-chunks content >15K chars and forwards mode to each chunk.
@@ -1650,7 +1692,13 @@ BEST PRACTICES:
 - Always send complete conversation content when saving — never summaries or partial content.
 - Use recall_memories before saving to check if a living document already exists for the topic.
 - For "save progress" requests, the system auto-generates contextual titles from conversation content.
-- When users describe a structured task (writing PRDs, debugging, planning sprints, strategic analysis), use run_workflow instead of handling it generically.`
+- When users describe a structured task (writing PRDs, debugging, planning sprints, strategic analysis), use run_workflow instead of handling it generically.`;
+
+const server = new Server(
+  { name: 'purmemo-mcp', version: CLIENT_VERSION },
+  {
+    capabilities: { tools: {}, resources: {}, prompts: {} },
+    instructions: TOOL_FLAGS.legacy ? LEGACY_INSTRUCTIONS : CORE_INSTRUCTIONS
   }
 );
 
@@ -1719,7 +1767,8 @@ const RESOURCES = [
     mimeType: 'text/html+skybridge',
     _meta: { 'openai/widgetCSP': { connect_domains: [], resource_domains: [] }, 'openai/widgetDomain': 'discover.widgets.purmemo.ai' }
   }
-];
+// The discover widget renders discover_related_conversations, which is paused by default.
+].filter((r) => TOOL_FLAGS.legacy || r.uri !== 'ui://widgets/discover.html');
 
 const RESOURCE_TEMPLATES = [
   {
@@ -1778,7 +1827,7 @@ const PROMPTS = [
 // Tool handlers extracted to ./tools/handlers.ts
 
 // Setup server
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: VISIBLE_TOOLS }));
 
 // Prepend update notice to a tool result if one is set
 function withUpdateNotice(result) {
@@ -1796,6 +1845,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (typeof toolCallCounts !== 'undefined') {
     toolCallCounts[name] = (toolCallCounts[name] || 0) + 1;
   }
+
+  // Paused or admin tool called while hidden → say what to use instead.
+  const hidden = hiddenToolResult(name);
+  if (hidden) return hidden;
 
   switch (name) {
     case 'save_conversation':
@@ -1838,11 +1891,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return withUpdateNotice(await handleGetPublicMemory(args));
     case 'report_memory':
       return withUpdateNotice(await handleReportMemory(args));
+    case 'search_past_sessions':
+      return withUpdateNotice(await handleSearchPastSessions(args));
     case 'get_acknowledged_errors':
-      if (!ADMIN_MODE) return { content: [{ type: 'text', text: '❌ Admin access required. Set PURMEMO_ADMIN=1 and provide a valid admin API key.' }] };
       return withUpdateNotice(await handleGetAcknowledgedErrors(args));
     case 'save_investigation_result':
-      if (!ADMIN_MODE) return { content: [{ type: 'text', text: '❌ Admin access required. Set PURMEMO_ADMIN=1 and provide a valid admin API key.' }] };
       return withUpdateNotice(await handleSaveInvestigation(args));
     case 'generate_handoff_brief':
       return withUpdateNotice(await handleGenerateHandoffBrief(args));
@@ -2193,7 +2246,7 @@ if (REMOTE_MODE) {
     API_URL,
     CLIENT_VERSION,
     PLATFORM,
-    TOOLS,
+    TOOLS: VISIBLE_TOOLS,
     RESOURCES,
     RESOURCE_TEMPLATES,
     PROMPTS,

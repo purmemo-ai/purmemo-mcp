@@ -1,20 +1,18 @@
-description = "Run a purmemo memory-powered workflow (debug, prd, sprint, growth, etc.)"
+description = "Work on something with your purmemo memory loaded (or catch up with no input)"
 prompt = """
-Run a purmemo workflow. These are memory-powered processes that load your past context automatically.
+Work on something with the user's purmemo memory loaded. Past context comes first, then the work.
 
-If no workflow specified, call `list_workflows` and show:
-  Available workflows:
-  Product: prd, roadmap, story, design, feedback
-  Strategy: ceo, growth, intel
-  Engineering: debug, review, deploy, incident
-  Business: metrics
-  Operations: sprint
-  Content: copy
+If no input was given, catch the user up: call `get_user_context`, then `recall_memories` with their current project or focus as the query (limit 5), and give a short briefing of what they were last working on, decisions made and what looks open. End with: Usage: /purmemo [what you want to work on]
 
-If a workflow is specified, parse the first word as workflow name and pass the rest as input.
-Call `run_workflow` with the workflow name and input.
+If input was given:
+1. Call `get_user_context` once.
+2. Call `recall_memories` with the input as the query (limit 8).
+3. Open the 1-3 most relevant results with `get_memory_details`.
+4. If the task is about a named project, product or machine and older facts might be stale, call `what_changed` with that name.
+5. If recall comes up thin, or the user wants what was actually said or decided in a past session, call `search_past_sessions` if it is available (beta).
+6. Say in one line which memories you are using, then do the task with that context.
 
-If the first word doesn't match a known workflow, pass everything to run_workflow without a workflow name — it has an intent classifier.
+If the work produced decisions worth keeping, offer to save them with `save_conversation`.
 
 {{args}}
 """

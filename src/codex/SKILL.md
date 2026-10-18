@@ -31,20 +31,13 @@ Before the session ends or when significant milestones are reached:
 | `save_conversation` | Save complete conversations as living documents |
 | `recall_memories` | Search past memories with natural language |
 | `get_memory_details` | Retrieve full memory content by ID |
-| `discover_related_conversations` | Find related conversations across platforms |
+| `what_changed` | What facts about a project, machine or person were replaced, with dates |
 | `get_user_context` | Get your identity profile and recent work context |
-| `run_workflow` | Run memory-powered workflows (debug, prd, review, sprint, etc.) |
-| `list_workflows` | See all available workflows |
-| `share_memory` | Share a memory publicly |
-| `recall_public` | Search community memories |
+| `search_past_sessions` | If available (beta): search raw past-session transcripts for what was actually said or decided |
 
-## Workflow Commands
+## Structured Tasks
 
-When the user describes structured tasks, use `run_workflow`:
-- "debug this" → `run_workflow(workflow="debug", input="...")`
-- "write a PRD" → `run_workflow(workflow="prd", input="...")`
-- "review this code" → `run_workflow(workflow="review", input="...")`
-- "plan this sprint" → `run_workflow(workflow="sprint", input="...")`
+When the user describes a structured task (debug this, write a PRD, plan the sprint), call `recall_memories` with the task as the query, open the most relevant results with `get_memory_details`, then do the task with that context. If older facts about a named project might be stale, check `what_changed` first.
 
 ## Living Document Pattern
 

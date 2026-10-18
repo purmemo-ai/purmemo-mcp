@@ -1,45 +1,21 @@
-Run a purmemo workflow. These are memory-powered processes that automatically load your past context and guide you through structured tasks.
+Work on something with your purmemo memory loaded. The user's input after `/purmemo` is the task or question; your past context comes first, then the work.
 
 ## How to use
 
-The user's input after `/purmemo` tells you which workflow to run.
-
 ### If no input (just "/purmemo")
-Call `mcp__purmemo-local__list_workflows` and present the available workflows:
-```
-Available purmemo workflows:
-
-Product:     prd, roadmap, story, design, feedback
-Strategy:    ceo, growth, intel
-Engineering: debug, review, deploy, incident
-Business:    metrics
-Operations:  sprint
-Content:     copy
-
-Usage: /purmemo [workflow] [describe what you need]
-Example: /purmemo debug users can't log in after password reset
-```
+Catch the user up:
+1. Call `mcp__purmemo-local__get_user_context` — who they are and what they are working on.
+2. Call `mcp__purmemo-local__recall_memories` with their current project or focus as the query, `limit`: 5.
+3. Present a short briefing: what they were last working on, decisions made, what looks open. End with: "Usage: /purmemo [what you want to work on]".
 
 ### If input provided
-Parse the first word as the workflow name. Pass the rest as input.
+Example: `/purmemo users can't log in after password reset`
+1. Call `mcp__purmemo-local__get_user_context` once, so you know who you are working with.
+2. Call `mcp__purmemo-local__recall_memories` with the input as the query, `limit`: 8.
+3. Open the 1–3 most relevant results with `mcp__purmemo-local__get_memory_details`.
+4. If the task is about a named project, product or machine and older facts might be stale, call `mcp__purmemo-local__what_changed` with that name.
+5. If recall comes up thin, or the user wants what was actually said or decided in a past session, call `search_past_sessions` if it is available (beta).
+6. Say in one line which memories you are using, then do the task with that context.
 
-Examples:
-- `/purmemo debug users can't log in` → `run_workflow(workflow="debug", input="users can't log in")`
-- `/purmemo prd add team sharing` → `run_workflow(workflow="prd", input="add team sharing")`
-- `/purmemo growth` → `run_workflow(workflow="growth", input="")`
-- `/purmemo help me plan this sprint` → `run_workflow(workflow="sprint", input="help me plan this sprint")`
-
-### If the first word doesn't match a workflow
-Pass the entire input to `run_workflow` without specifying a workflow — it has an intent classifier that auto-routes:
-- `/purmemo I need to write copy for our launch email` → auto-routes to `copy` workflow
-- `/purmemo what's our competitive moat?` → auto-routes to `ceo` workflow
-
-### Tool to use
-Always use `mcp__purmemo-local__run_workflow` (not npm or claude_ai variants).
-
-### What happens
-The workflow engine automatically:
-1. Loads your purmemo identity (who you are, what you're building)
-2. Recalls relevant memories for this task
-3. Shows which memories are powering the response (transparency)
-4. Guides you through a structured process with numbered steps
+### Afterwards
+If the work produced decisions worth keeping, offer to save them with `mcp__purmemo-local__save_conversation` (same title as an existing memory updates it).
