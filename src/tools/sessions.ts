@@ -8,7 +8,7 @@
  */
 
 import { structuredLog } from '../lib/logger.js';
-import { makeSessionsCall, sanitizeUnicode, safeErrorMessage } from '../lib/api-client.js';
+import { makeSessionsCall, sanitizeUnicode, safeErrorMessage, readBaseUrl } from '../lib/api-client.js';
 
 export const SESSIONS_LIMIT_DEFAULT = 6;
 export const SESSIONS_LIMIT_MAX = 12;
@@ -43,3 +43,37 @@ export function createSearchPastSessions(call = makeSessionsCall) {
 }
 
 export const handleSearchPastSessions = createSearchPastSessions();
+
+// ---- opening a session part (2026-10-18) ------------------------------------
+// search_past_sessions results carry ids that only purmemo-next knows. When
+// get_memory_details reads from live (no read base) and live says not found,
+// the same id is retried on the sessions base. Beta off, or read base on
+// (reads already go to next) → no retry.
+
+/** True when get_memory_details should retry a live not-found on the sessions base. */
+export function sessionsRetryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.PURMEMO_SESSIONS_BETA === '1' && !readBaseUrl(env);
+}
+
+/** Does a get_memory_details answer mean "no such memory"? */
+export function isNotFoundResult(data: any): boolean {
+  const text = data?.content?.[0]?.text;
+  if (!data?.content?.length) return true;
+  return typeof text === 'string' && text.length < 400 && /\bnot found\b/i.test(text);
+}
+
+/** Try the id on the sessions base. Returns next's result when it found the part, else null. */
+export async function openSessionPart(args: Record<string, unknown>, call = makeSessionsCall) {
+  try {
+    const data = await call('/api/v10/mcp/tools/execute', {
+      method: 'POST',
+      body: JSON.stringify({ tool: 'get_memory_details', arguments: args })
+    });
+    if (data?.isError || isNotFoundResult(data)) return null;
+    structuredLog.info('get_memory_details: served by sessions base', { memory_id: args.memoryId });
+    return data;
+  } catch (err: any) {
+    structuredLog.warn('get_memory_details: sessions retry failed', { status: err?.status ?? null, kind: err?.kind ?? null });
+    return null;
+  }
+}

@@ -1796,22 +1796,47 @@ export async function handleGetMemoryDetails(args) {
     }
   } catch { /* AMP not running — continue to cloud */ }
 
+  const detailArgs = {
+    memoryId: resolvedId,
+    includeLinkedParts: args.includeLinkedParts !== false,
+    ...(args.offset != null ? { offset: args.offset } : {}),
+    ...(args.maxChars != null ? { maxChars: args.maxChars } : {}),
+  };
+
+  // Sessions beta: search_past_sessions ids live only on purmemo-next, so a live
+  // not-found is retried there (data === null means live answered HTTP 404).
+  // Loaded lazily so the beta-off path never touches it.
+  const sessionsFallback = async (data) => {
+    if (process.env.PURMEMO_SESSIONS_BETA !== '1') return null;
+    try {
+      const s = await import('./sessions.js');
+      if (!s.sessionsRetryEnabled()) return null;
+      if (data !== null && !s.isNotFoundResult(data)) return null;
+      return await s.openSessionPart(detailArgs);
+    } catch { return null; }
+  };
+
   try {
-    const data = await makeReadCall(`/api/v10/mcp/tools/execute`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        tool: 'get_memory_details',
-        arguments: {
-          memoryId: resolvedId,
-          includeLinkedParts: args.includeLinkedParts !== false,
-          ...(args.offset != null ? { offset: args.offset } : {}),
-          ...(args.maxChars != null ? { maxChars: args.maxChars } : {}),
-        }
-      })
-    });
+    let data;
+    try {
+      data = await makeReadCall(`/api/v10/mcp/tools/execute`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          tool: 'get_memory_details',
+          arguments: detailArgs
+        })
+      });
+    } catch (err) {
+      if (err?.status !== 404) throw err;
+      const fromSessions = await sessionsFallback(null);
+      if (!fromSessions) throw err;
+      data = fromSessions;
+    }
+    const fromSessions = await sessionsFallback(data);
+    if (fromSessions) data = fromSessions;
 
     if (!data.content || !data.content[0]) {
       structuredLog.warn(`${toolName}: no content in response`, {
