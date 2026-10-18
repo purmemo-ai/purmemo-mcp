@@ -36,6 +36,8 @@ import {
   handleSaveInvestigation
 } from '../tools/handlers.js';
 import { handleGenerateHandoffBrief } from '../tools/handoff.js';
+import { handleSearchPastSessions } from '../tools/sessions.js';
+import { hiddenToolResult } from '../lib/tool-visibility.js';
 import { saveRefreshToken, loadRefreshToken, deleteRefreshToken } from './refresh-token-store.js';
 import { reportIncident } from '../lib/incident-reporter.js';
 
@@ -313,9 +315,14 @@ export async function startRemoteServer(ctx) {
     // Track tool usage
     toolCallCounts[toolName] = (toolCallCounts[toolName] || 0) + 1;
 
+    // Paused or admin tool called while hidden → say what to use instead.
+    const hidden = hiddenToolResult(toolName);
+    if (hidden) return hidden;
+
     // Tools that MUST be handled locally (not available on backend)
     const localOnlyHandlers = {
       'what_changed': handleWhatChanged,
+      'search_past_sessions': handleSearchPastSessions,
       'get_user_context': handleGetUserContext,
       'run_workflow': handleRunWorkflow,
       'list_workflows': handleListWorkflows,
@@ -506,7 +513,7 @@ export async function startRemoteServer(ctx) {
             protocolVersion: negotiatedVersion,
             capabilities: { tools: { listChanged: true }, resources: { subscribe: false, listChanged: false }, prompts: { listChanged: false }, logging: {} },
             serverInfo: { name: 'purmemo-mcp', version: CLIENT_VERSION },
-            instructions: 'pūrmemo tools are ready. Save memories, recall information, and run memory-powered workflows.'
+            instructions: 'pūrmemo tools are ready. Save memories and recall information.'
           }
         }, 200, { 'Mcp-Session-Id': sessionId });
       }

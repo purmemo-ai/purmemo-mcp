@@ -465,3 +465,46 @@ export function createReadCall(deps: ReadCallDeps = {}) {
 
 /** Default read call used by the read tool handlers. */
 export const makeReadCall = createReadCall();
+
+// ---- past sessions (purmemo-next only, beta 2026-10-18) ---------------------
+// search_past_sessions reads raw session transcripts, which only purmemo-next
+// holds, so there is no live fallback: a failure is thrown, tagged like
+// makeApiCall's errors, for the handler to explain. Base: PURMEMO_READ_BASE_URL,
+// else PURMEMO_SESSIONS_URL, else https://next.purmemo.ai. Same credential and
+// timeout as the read-base path.
+export const SESSIONS_DEFAULT_URL = 'https://next.purmemo.ai';
+
+export function sessionsBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  const raw = (env.PURMEMO_READ_BASE_URL || '').trim() || (env.PURMEMO_SESSIONS_URL || '').trim() || SESSIONS_DEFAULT_URL;
+  return raw.replace(/\/+$/, '');
+}
+
+type SessionsCallDeps = { fetchImpl?: typeof fetch; env?: NodeJS.ProcessEnv; key?: string | null };
+
+export function createSessionsCall(deps: SessionsCallDeps = {}) {
+  return async function sessionsCall(endpoint: string, options: any = {}) {
+    const fetchImpl = deps.fetchImpl || globalThis.fetch;
+    const key = deps.key !== undefined ? deps.key : getEffectiveApiKey();
+    if (!key) throw tagError(new Error('API Error 401: No API key configured. Run `npx purmemo-mcp setup` to connect, or set PURMEMO_API_KEY.'), 401, 'auth');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), options.timeoutMs || 20000);
+    try {
+      const r = await fetchImpl(`${sessionsBaseUrl(deps.env)}${endpoint}`, { method: options.method || 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'User-Agent': _userAgent, ...(options.headers || {}) }, body: options.body, signal: controller.signal });
+      if (!r.ok) {
+        const text = (await r.text().catch(() => '')).slice(0, 500);
+        const s = r.status;
+        throw tagError(new Error(`API Error ${s}: ${text}`), s,
+          s === 429 ? 'quota' : s === 401 ? 'auth' : s === 403 ? 'forbidden' : s === 402 ? 'payment' : s >= 500 ? 'server' : 'client');
+      }
+      return await r.json();
+    } catch (err: any) {
+      if (err?.name === 'AbortError') throw tagError(new Error('Request timeout after 20 seconds'), 0, 'timeout');
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+
+/** Default call used by search_past_sessions. */
+export const makeSessionsCall = createSessionsCall();

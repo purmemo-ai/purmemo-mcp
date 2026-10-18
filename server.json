@@ -15,88 +15,16 @@
       "name": "save_conversation"
     },
     {
-      "name": "save_artifact"
-    },
-    {
-      "name": "commit"
-    },
-    {
-      "name": "snapshot"
-    },
-    {
-      "name": "snapshot_sources"
-    },
-    {
-      "name": "save_snapshot"
-    },
-    {
-      "name": "get_snapshot"
-    },
-    {
-      "name": "accept_snapshot"
-    },
-    {
       "name": "recall_memories"
     },
     {
       "name": "what_changed"
     },
     {
-      "name": "list_clusters"
-    },
-    {
       "name": "get_memory_details"
     },
     {
-      "name": "discover_related_conversations"
-    },
-    {
       "name": "get_user_context"
-    },
-    {
-      "name": "run_workflow"
-    },
-    {
-      "name": "list_workflows"
-    },
-    {
-      "name": "share_memory"
-    },
-    {
-      "name": "recall_public"
-    },
-    {
-      "name": "get_public_memory"
-    },
-    {
-      "name": "report_memory"
-    },
-    {
-      "name": "get_acknowledged_errors"
-    },
-    {
-      "name": "save_investigation_result"
-    },
-    {
-      "name": "generate_handoff_brief"
-    },
-    {
-      "name": "save_test_result"
-    },
-    {
-      "name": "get_test_results"
-    },
-    {
-      "name": "get_artifacts"
-    },
-    {
-      "name": "get_investigations"
-    },
-    {
-      "name": "get_next_task"
-    },
-    {
-      "name": "complete_task"
     }
   ],
   "packages": [
