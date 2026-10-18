@@ -2985,16 +2985,16 @@ export async function handleSaveInvestigation(args) {
 // Live purmemo can search; only the rebuild's claim ledger knows WHEN a fact
 // became true, when it stopped, and what replaced it. This tool reads that
 // history from purmemo-next's dossier endpoint with the caller's own live
-// credential (next resolves it via live's /auth/me). purmemo-next lives on the
-// same box as the public gateway, so the default is localhost; the shadow env
-// (local sessions) or PURMEMO_NEXT_URL override it.
-function nextBaseUrl(): string {
-  const explicit = (process.env.PURMEMO_NEXT_URL || '').trim();
+// credential (next resolves it via live's /auth/me). Base: PURMEMO_NEXT_URL, else
+// the same next base as search_past_sessions (PURMEMO_READ_BASE_URL, else
+// PURMEMO_SESSIONS_URL, else https://next.purmemo.ai). 2026-10-18: the old
+// default, http://127.0.0.1:3210, answered nowhere (not on users' machines, not
+// beside the hosted connector), so the tool failed for everyone without an override.
+export function nextBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  const explicit = (env.PURMEMO_NEXT_URL || '').trim();
   if (explicit) return explicit.replace(/\/+$/, '');
-  const shadow = (process.env.PURMEMO_SHADOW_DOOR_URL || '').trim();
-  const m = /^(https?:\/\/[^/]+)/.exec(shadow);
-  if (m) return m[1];
-  return 'http://127.0.0.1:3210';
+  const raw = (env.PURMEMO_READ_BASE_URL || '').trim() || (env.PURMEMO_SESSIONS_URL || '').trim() || 'https://next.purmemo.ai';
+  return raw.replace(/\/+$/, '');
 }
 
 const fmtDay = (v: unknown) => (v ? String(v).slice(0, 10) : '?');
