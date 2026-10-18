@@ -1,5 +1,5 @@
 {
   "name": "purmemo",
   "version": "1.0.0",
-  "description": "Persistent AI memory — auto-capture, recall, and workflows for Gemini CLI"
+  "description": "Persistent AI memory — auto-capture and recall for Gemini CLI"
 }

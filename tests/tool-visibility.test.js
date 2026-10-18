@@ -10,7 +10,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -89,6 +89,30 @@ describe('tools/list by env flag (built server over stdio)', () => {
     assert.equal(res[1].result.isError, true);
     assert.match(res[2].result.content[0].text, /run_workflow is paused; set PURMEMO_LEGACY_TOOLS=1/);
     assert.match(res[3].result.content[0].text, /Admin access required/);
+  });
+});
+
+describe('resources and shipped command text follow the default tool set', () => {
+  it('the discover widget is listed only with PURMEMO_LEGACY_TOOLS=1', async () => {
+    const uris = async (env) => (await rpc(env, [{ id: 1, method: 'resources/list' }]))[1].result.resources.map((r) => r.uri);
+    const def = await uris({});
+    assert.ok(!def.includes('ui://widgets/discover.html'));
+    assert.ok(def.includes('ui://widgets/recall-v39.html'));
+    assert.ok((await uris({ PURMEMO_LEGACY_TOOLS: '1' })).includes('ui://widgets/discover.html'));
+  });
+  it('no shipped slash command, Gemini command or Codex skill tells the assistant to use a paused or admin tool', () => {
+    const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+    const files = [
+      ...readdirSync(join(root, 'src/commands')).map((f) => join(root, 'src/commands', f)),
+      ...readdirSync(join(root, 'src/gemini/commands')).map((f) => join(root, 'src/gemini/commands', f)),
+      join(root, 'src/codex/SKILL.md'),
+    ];
+    // 'commit' and 'snapshot' are ordinary words too, so they are left out of the scan.
+    const names = [...LEGACY_TOOLS.filter((n) => n !== 'commit' && n !== 'snapshot'), ...ADMIN_TOOLS];
+    for (const f of files) {
+      const text = readFileSync(f, 'utf8');
+      for (const t of names) assert.ok(!text.includes(t), `${f} mentions ${t}`);
+    }
   });
 });
 

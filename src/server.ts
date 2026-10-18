@@ -1767,7 +1767,8 @@ const RESOURCES = [
     mimeType: 'text/html+skybridge',
     _meta: { 'openai/widgetCSP': { connect_domains: [], resource_domains: [] }, 'openai/widgetDomain': 'discover.widgets.purmemo.ai' }
   }
-];
+// The discover widget renders discover_related_conversations, which is paused by default.
+].filter((r) => TOOL_FLAGS.legacy || r.uri !== 'ui://widgets/discover.html');
 
 const RESOURCE_TEMPLATES = [
   {
