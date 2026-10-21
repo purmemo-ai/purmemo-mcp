@@ -288,6 +288,9 @@ export async function startRemoteServer(ctx) {
                 delete refreshTokenStore[token];
                 // Drop the old persisted row too — its token was rotated upstream.
                 await deleteRefreshToken(token);
+                // Same account, new key: keep the account id for the trial count and learn the flag for the new key.
+                rememberAccount(newToken, knownAccount(token));
+                routing.prefetch(newToken);
                 return newToken;
               }
             }

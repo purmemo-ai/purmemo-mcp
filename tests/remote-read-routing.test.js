@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const LIVE = 'https://api.invalid', NEXT = 'https://next.invalid';
-const KEYS = { pm_chris: { id: 'acct-chris', backend: 'next' }, pm_other: { id: 'acct-other', backend: 'live' } };
+const KEYS = { pm_chris: { id: 'acct-chris', backend: 'next' }, pm_other: { id: 'acct-other', backend: 'live' }, pm_slow: { id: 'acct-slow', backend: 'next' } };
 let base, srv, killed = false, nextMode = 'ok', hits, authMeCalls, trialDir;
 const realFetch = globalThis.fetch;
 const env = { PURMEMO_READ_BASE_URL: NEXT };
@@ -34,6 +34,7 @@ before(async () => {
     }
     if (u === `${NEXT}/api/v1/read-routing/me`) {
       hits.routing.push(bearer);
+      if (bearer === 'pm_slow') return new Promise(() => {}); // a lookup that never answers
       return acct ? { ok: true, status: 200, json: async () => ({ ok: true, user_id: acct.id, backend: acct.backend }), text: async () => '' }
                   : { ok: false, status: 401, json: async () => ({}), text: async () => '' };
     }
@@ -98,6 +99,23 @@ describe('hosted per-account routing', () => {
     assert.equal(l.bearer, 'pm_other'); assert.deepEqual(l.body, { tool: 'recall_memories', arguments: { query: 'the secret question' } });
     assert.equal(l.headers['X-MCP-Version'], '0.0.0-test'); assert.equal(l.headers['Content-Type'], 'application/json'); assert.ok(l.hasSignal);
     assert.equal(trialLines().length, before, 'accounts on live are not counted');
+  });
+  it('a read never waits for the lookup: with next hanging on the flag, the first read answers from live at once', async () => {
+    const t0 = Date.now();
+    const r = await call('pm_slow');
+    assert.equal(r.text, 'from live'); assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+    assert.equal(hits.routing.length, 1); assert.equal(hits.next.length, 0); assert.equal(hits.live.length, 1);
+    assert.equal(hits.live[0].bearer, 'pm_slow');
+  });
+  it('PURMEMO_READ_BASE_DISABLED=1 and an unset PURMEMO_READ_BASE_URL beat a cached next answer', async () => {
+    env.PURMEMO_READ_BASE_DISABLED = '1';
+    try { const r = await call('pm_chris'); assert.equal(r.text, 'from live'); assert.equal(hits.next.length, 0); assert.equal(hits.live.length, 1); }
+    finally { delete env.PURMEMO_READ_BASE_DISABLED; }
+    const saved = env.PURMEMO_READ_BASE_URL; delete env.PURMEMO_READ_BASE_URL; hits = { next: [], live: [], routing: [] };
+    try { const r = await call('pm_chris'); assert.equal(r.text, 'from live'); assert.equal(hits.next.length, 0); assert.equal(hits.routing.length, 0, 'no lookup either'); }
+    finally { env.PURMEMO_READ_BASE_URL = saved; }
+    hits = { next: [], live: [], routing: [] };
+    assert.equal((await call('pm_chris')).text, 'from next', 'back on: the cached answer still serves');
   });
   it('the kill file sends a flagged account to live too', async () => {
     killed = true;

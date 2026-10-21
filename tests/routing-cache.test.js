@@ -5,7 +5,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { createRoutingCache, ROUTING_TTL_MS, ROUTING_NEG_TTL_MS } from '../dist/lib/api-client.js';
+import { createRoutingCache, ROUTING_TTL_MS, ROUTING_NEG_TTL_MS, ROUTING_MAX_KEYS } from '../dist/lib/api-client.js';
 
 const env = { PURMEMO_READ_BASE_URL: 'http://next:3211' };
 const noKill = () => false;
@@ -60,5 +60,11 @@ describe('createRoutingCache', () => {
   it('keys are never stored: the cache holds hashes', async () => {
     const m = make(answer('next')); m.cache.prefetch('sk-secret-key'); await m.cache.settle();
     assert.equal(m.cache._size(), 1); assert.ok(!JSON.stringify([...m.events]).includes('sk-secret'));
+  });
+  it('the cache is capped: beyond the max the oldest key is dropped', () => {
+    const m = make(answer('next'));
+    for (let i = 0; i < ROUTING_MAX_KEYS + 5; i++) m.cache.remember(`k${i}`, 'next', ROUTING_TTL_MS);
+    assert.equal(m.cache._size(), ROUTING_MAX_KEYS);
+    assert.equal(m.cache.get('k0'), null, 'oldest evicted'); assert.equal(m.cache.get(`k${ROUTING_MAX_KEYS + 4}`), 'next');
   });
 });
