@@ -406,8 +406,10 @@ export async function makeApiCall(endpoint, options = {}, apiKeyOverride = null)
 // falls back to live and is logged once per call — a bad next answer is never
 // worse than live for the user, only slower.
 import { existsSync } from 'fs';
+import { createHash } from 'node:crypto';
 import { homedir } from 'os';
 import { join } from 'path';
+import { recordReadTrial } from './read-trial.js';
 
 export const READ_BASE_TOOLS = new Set(['recall_memories', 'get_memory_details', 'discover_related_conversations']);
 export const READ_BASE_KILL_FILE = join(homedir(), '.purmemo', 'read-base.off');
@@ -428,13 +430,22 @@ export function readBaseEligible(body: any): boolean {
   return true;
 }
 
-type ReadCallDeps = { fetchImpl?: typeof fetch; fallback?: (endpoint: string, options: any) => Promise<any>; env?: NodeJS.ProcessEnv; killFileExists?: (p: string) => boolean; key?: string | null; onEvent?: (e: Record<string, unknown>) => void };
+type ReadCallDeps = {
+  fetchImpl?: typeof fetch; fallback?: (endpoint: string, options: any) => Promise<any>; env?: NodeJS.ProcessEnv;
+  killFileExists?: (p: string) => boolean; key?: string | null; onEvent?: (e: Record<string, unknown>) => void;
+  /** Trial-count tags (2026-10-21): the caller's account id and whether this is the hosted or the local connector. */
+  accountId?: string | null; mode?: 'local' | 'hosted';
+  /** Called when next answers but not 2xx (status + a 200-char preview), before the live fallback. */
+  onReject?: (info: { status: number; preview: string }) => void;
+};
 
 /** Factory so the routing + fallback logic is testable without the network. */
 export function createReadCall(deps: ReadCallDeps = {}) {
   const fetchImpl = deps.fetchImpl || globalThis.fetch;
   const fallback = deps.fallback || ((endpoint: string, options: any) => makeApiCall(endpoint, options));
-  const onEvent = deps.onEvent || ((e: Record<string, unknown>) => structuredLog.info('read-base', e));
+  const onEvent = deps.onEvent || ((e: Record<string, unknown>) => { structuredLog.info('read-base', e); recordReadTrial(e); });
+  const mode = deps.mode || 'local';
+  const tag = (e: Record<string, unknown>) => onEvent({ mode, account: deps.accountId || null, ...e });
   return async function readCall(endpoint: string, options: any = {}) {
     const base = readBaseUrl(deps.env, deps.killFileExists);
     let body: any = null;
@@ -450,14 +461,15 @@ export function createReadCall(deps: ReadCallDeps = {}) {
       clearTimeout(timer);
       if (!r.ok) {
         const preview = (await r.text().catch(() => '')).slice(0, 200);
-        onEvent({ served_by: 'live', reason: `next HTTP ${r.status}`, tool: body.tool, ms: Date.now() - started, preview });
+        deps.onReject?.({ status: r.status, preview });
+        tag({ served_by: 'live', reason: `next HTTP ${r.status}`, tool: body.tool, ms: Date.now() - started, preview });
         return fallback(endpoint, options);
       }
       const data = await r.json();
-      onEvent({ served_by: 'next', tool: body.tool, ms: Date.now() - started, base });
+      tag({ served_by: 'next', tool: body.tool, ms: Date.now() - started, base });
       return data;
     } catch (err: any) {
-      onEvent({ served_by: 'live', reason: `next error: ${err?.message || err}`, tool: body.tool, ms: Date.now() - started });
+      tag({ served_by: 'live', reason: `next error: ${err?.message || err}`, tool: body.tool, ms: Date.now() - started });
       return fallback(endpoint, options);
     }
   };
@@ -465,6 +477,71 @@ export function createReadCall(deps: ReadCallDeps = {}) {
 
 /** Default read call used by the read tool handlers. */
 export const makeReadCall = createReadCall();
+
+// ---- read routing flag (hosted connector, 2026-10-21) -------------------------
+// Which backend serves an account's reads is a row on the account in the shared
+// database (next migration 032). Next serves it at GET /api/v1/read-routing/me
+// (the caller's own key; next resolves the account) and ENFORCES it on its MCP
+// execute path (501 not_on_next). The hosted connector only caches the answer,
+// per key hash, and never waits for it: the flag is prefetched when a key is
+// validated, a read with no cached answer goes to live exactly as today, and a
+// 501 not_on_next marks the key live at once. Nothing here applies to the local
+// (stdio) connector, whose owner controls the switch by env; next's enforcement
+// covers it anyway.
+export const ROUTING_TTL_MS = 10 * 60 * 1000;      // a 'next'/'live' answer
+export const ROUTING_NEG_TTL_MS = 60 * 1000;       // after a failed lookup: live, retry in a minute
+export const ROUTING_MAX_KEYS = 10000;
+export type Backend = 'next' | 'live';
+type RoutingDeps = { fetchImpl?: typeof fetch; env?: NodeJS.ProcessEnv; killFileExists?: (p: string) => boolean; now?: () => number; ttlMs?: number; negTtlMs?: number; onEvent?: (e: Record<string, unknown>) => void };
+
+export function createRoutingCache(deps: RoutingDeps = {}) {
+  const now = deps.now || Date.now;
+  const ttl = deps.ttlMs ?? ROUTING_TTL_MS, negTtl = deps.negTtlMs ?? ROUTING_NEG_TTL_MS;
+  const onEvent = deps.onEvent || ((e: Record<string, unknown>) => structuredLog.info('read-routing', e));
+  const byKey = new Map<string, { backend: Backend; exp: number }>();
+  const inflight = new Map<string, Promise<void>>();
+  const hash = (k: string) => createHash('sha256').update(String(k)).digest('hex');
+
+  function remember(key: string, backend: Backend, ttlMs: number) {
+    if (byKey.size >= ROUTING_MAX_KEYS) byKey.delete(byKey.keys().next().value as string);
+    byKey.set(hash(key), { backend, exp: now() + ttlMs });
+  }
+  /** The cached backend for this key, or null when nothing fresh is known (the caller then goes to live). */
+  function get(key: string): Backend | null {
+    const h = hash(key); const hit = byKey.get(h);
+    if (!hit) return null;
+    if (hit.exp <= now()) { byKey.delete(h); return null; }
+    return hit.backend;
+  }
+  async function fetchOnce(key: string): Promise<void> {
+    const base = readBaseUrl(deps.env, deps.killFileExists);
+    if (!base) return;
+    const fetchImpl = deps.fetchImpl || globalThis.fetch;
+    const started = now();
+    try {
+      const r = await fetchImpl(`${base}/api/v1/read-routing/me`, { headers: { Authorization: `Bearer ${key}`, 'User-Agent': _userAgent }, signal: AbortSignal.timeout(5000) });
+      const data: any = r.ok ? await r.json().catch(() => null) : null;
+      const backend = data?.backend;
+      if (backend === 'next' || backend === 'live') { remember(key, backend, ttl); onEvent({ backend, ms: now() - started }); }
+      else { remember(key, 'live', negTtl); onEvent({ backend: 'live', reason: `routing HTTP ${r.status}`, ms: now() - started }); }
+    } catch (err: any) {
+      remember(key, 'live', negTtl); onEvent({ backend: 'live', reason: `routing error: ${err?.message || err}`, ms: now() - started });
+    }
+  }
+  /** Fire-and-forget: learn the flag in the background. Never awaited by a request. */
+  function prefetch(key: string): void {
+    if (!key || get(key) !== null) return;
+    const h = hash(key);
+    if (inflight.has(h)) return;
+    const p = fetchOnce(key).catch(() => {}).finally(() => inflight.delete(h));
+    inflight.set(h, p);
+  }
+  /** Next said 501 not_on_next: stop trying next for this key until the flag is re-read. */
+  function markLive(key: string): void { remember(key, 'live', ttl); }
+  /** Tests / draining: wait for any lookup in flight. */
+  async function settle(): Promise<void> { await Promise.all([...inflight.values()]); }
+  return { get, prefetch, markLive, remember, settle, _size: () => byKey.size };
+}
 
 // ---- past sessions (purmemo-next only, beta 2026-10-18) ---------------------
 // search_past_sessions reads raw session transcripts, which only purmemo-next

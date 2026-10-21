@@ -18,6 +18,7 @@ import * as os from 'node:os';
 import * as readline from 'node:readline/promises';
 import { execSync } from 'node:child_process';
 import TokenStore from './auth/token-store.js';
+import { summarizeReadTrial, formatReadTrialSummary } from './lib/read-trial.js';
 import {
   getActiveTokenFile,
   getActiveProfileLabel,
@@ -115,6 +116,7 @@ switch (command) {
   case 'logout':   await runLogout(); break;
   case 'hooks':    await runHooksOnly(); break;
   case 'accounts': await runAccounts(); break;
+  case 'trial':    runTrial(process.argv.slice(3)); break;
   case 'use':      await runUse(process.argv[3]); break;
   case 'add':      await runSetup(/*forceNewProfile=*/true); break;
   case 'remove':   await runRemove(process.argv[3], process.argv.includes('--force')); break;
@@ -144,11 +146,21 @@ function runHelp() {
   console.log('  logout             Disconnect the active account');
   console.log('  hooks              Reinstall hooks only');
   console.log('  update             Self-upgrade to the latest published version');
+  console.log('  trial [--days N]   Count reads served by purmemo-next vs live (counts only, last N days)');
   console.log('  uninstall          Show how to fully remove purmemo from this machine');
   console.log('  help               Show this message');
   console.log('');
   console.log(chalk.bold('Environment:'));
   console.log('  PURMEMO_PROFILE=<email>   Override active account for this shell only');
+}
+
+// ─── Trial count (next-served reads, 2026-10-21) ──────────────────────────────
+// Prints one line per day: how many routed reads next served vs live, why live,
+// how fast next was. Counts only — the file holds no queries and no memory text.
+function runTrial(args: string[]) {
+  const i = args.indexOf('--days');
+  const days = i >= 0 ? Number(args[i + 1]) : 7;
+  console.log(formatReadTrialSummary(summarizeReadTrial({ days: Number.isFinite(days) && days > 0 ? days : 7 })));
 }
 
 // ─── Update ───────────────────────────────────────────────────────────────────

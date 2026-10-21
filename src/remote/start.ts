@@ -7,7 +7,8 @@
  */
 
 import { structuredLog } from '../lib/logger.js';
-import { apiCircuitBreaker, runWithApiKey } from '../lib/api-client.js';
+import { apiCircuitBreaker, runWithApiKey, createReadCall, createRoutingCache, READ_BASE_TOOLS } from '../lib/api-client.js';
+import { createHash } from 'node:crypto';
 import { escapeHtml, isSafeParams, validateRedirectUri, isAllowedRedirectTarget, buildCallbackUrl, jsStringLiteral } from './oauth-guards.js';
 import {
   handleSaveConversation,
@@ -211,6 +212,31 @@ export async function startRemoteServer(ctx) {
   }
   const BACKEND_UNAVAILABLE_JSONRPC = { code: -32000, message: 'Backend temporarily unavailable, retry shortly', data: { type: 'backend_unavailable' } };
 
+  // ── Read routing per account (2026-10-21) ──
+  // Which backend serves an account's reads is a row on the account in the
+  // shared database (next migration 032). The connector caches next's answer
+  // per key hash (createRoutingCache) and never waits for it: prefetched when a
+  // key is validated; a read with no cached answer goes to live as today. The
+  // account id from live's /auth/me body is kept the same way, only for the
+  // trial count. ctx.readDeps lets tests inject env and the kill-file check.
+  const readDeps = ctx.readDeps || {};
+  const routing = createRoutingCache({ env: readDeps.env, killFileExists: readDeps.killFileExists });
+  const ACCOUNT_TTL_MS = 24 * 60 * 60 * 1000;
+  const ACCOUNT_CACHE_MAX = 10000;
+  const accountByKey = new Map();
+  const keyHash = (k) => createHash('sha256').update(String(k)).digest('hex');
+  function rememberAccount(key, userId) {
+    if (!key || !userId) return;
+    if (accountByKey.size >= ACCOUNT_CACHE_MAX) accountByKey.delete(accountByKey.keys().next().value);
+    accountByKey.set(keyHash(key), { id: String(userId), exp: Date.now() + ACCOUNT_TTL_MS });
+  }
+  function knownAccount(key) {
+    const h = keyHash(key); const hit = accountByKey.get(h);
+    if (!hit) return null;
+    if (hit.exp <= Date.now()) { accountByKey.delete(h); return null; }
+    return hit.id;
+  }
+
   // Helper: validate API key from Authorization header.
   // Returns the (possibly refreshed) key, null if rejected, throws BackendUnavailableError if unverifiable.
   async function validateApiKeyFromRequest(req) {
@@ -222,7 +248,13 @@ export async function startRemoteServer(ctx) {
         headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': USER_AGENT },
         signal: AbortSignal.timeout(10000)
       });
-      if (resp.ok) return token;
+      if (resp.ok) {
+        // Keep the account id live just told us (per-account read routing); a body we can't read changes nothing.
+        const body = await resp.json().catch(() => null);
+        rememberAccount(token, body?.user_id);
+        routing.prefetch(token); // background; a read never waits for it
+        return token;
+      }
       if (resp.status >= 500) throw new BackendUnavailableError(`auth/me ${resp.status}`);
       // Silent token refresh if 401 and we have a refresh token.
       // Cache MISS in-memory → fall back to durable DB store (survives restarts).
@@ -256,6 +288,9 @@ export async function startRemoteServer(ctx) {
                 delete refreshTokenStore[token];
                 // Drop the old persisted row too — its token was rotated upstream.
                 await deleteRefreshToken(token);
+                // Same account, new key: keep the account id for the trial count and learn the flag for the new key.
+                rememberAccount(newToken, knownAccount(token));
+                routing.prefetch(newToken);
                 return newToken;
               }
             }
@@ -362,8 +397,32 @@ export async function startRemoteServer(ctx) {
       } catch (e) { return { content: [{ type: 'text', text: `Error: ${e.message}` }] }; }
     }
 
-    // recall_memories, get_memory_details, discover_related_conversations
-    // proxy to backend — ChatGPT widgets parse the backend's response format
+    // recall_memories, get_memory_details, discover_related_conversations:
+    // an account whose read backend is next (per the cached routing flag) goes
+    // next first then live, with the same eligibility, timeout and fallback as
+    // the local read-base switch; everyone else takes proxyToLive exactly as before.
+    if (READ_BASE_TOOLS.has(toolName)) {
+      const backend = routing.get(apiKey);
+      if (backend === null) routing.prefetch(apiKey); // unknown → live now, next time we know
+      if (backend !== 'next') return proxyToLive(toolName, toolArgs, apiKey);
+      const readCall = createReadCall({
+        key: apiKey, accountId: knownAccount(apiKey), mode: 'hosted',
+        env: readDeps.env, killFileExists: readDeps.killFileExists,
+        fallback: () => proxyToLive(toolName, toolArgs, apiKey),
+        onReject: ({ status, preview }) => { if (status === 501 && /not_on_next/.test(preview)) routing.markLive(apiKey); }
+      });
+      return readCall('/api/v10/mcp/tools/execute', {
+        method: 'POST', body: JSON.stringify({ tool: toolName, arguments: toolArgs }),
+        timeoutMs: 20000, headers: { 'X-MCP-Version': CLIENT_VERSION }
+      });
+    }
+    return proxyToLive(toolName, toolArgs, apiKey);
+  }
+
+  // The live path for the read tools, unchanged (2026-10-21: moved out of
+  // executeToolForRemote so the per-account switch can fall back to it).
+  // ChatGPT widgets parse the backend's response format.
+  async function proxyToLive(toolName, toolArgs, apiKey) {
     try {
       const resp = await fetch(`${API_URL}/api/v10/mcp/tools/execute`, {
         method: 'POST',
