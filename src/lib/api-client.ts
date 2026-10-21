@@ -405,9 +405,10 @@ export async function makeApiCall(endpoint, options = {}, apiKeyOverride = null)
 // Any failure on next (network, 5xx, 501 not-supported / unsupported filter)
 // falls back to live and is logged once per call — a bad next answer is never
 // worse than live for the user, only slower.
-import { existsSync } from 'fs';
+import { existsSync, readFileSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import { recordReadTrial } from './read-trial.js';
 
 export const READ_BASE_TOOLS = new Set(['recall_memories', 'get_memory_details', 'discover_related_conversations']);
 export const READ_BASE_KILL_FILE = join(homedir(), '.purmemo', 'read-base.off');
@@ -428,18 +429,27 @@ export function readBaseEligible(body: any): boolean {
   return true;
 }
 
-type ReadCallDeps = { fetchImpl?: typeof fetch; fallback?: (endpoint: string, options: any) => Promise<any>; env?: NodeJS.ProcessEnv; killFileExists?: (p: string) => boolean; key?: string | null; onEvent?: (e: Record<string, unknown>) => void };
+type ReadCallDeps = {
+  fetchImpl?: typeof fetch; fallback?: (endpoint: string, options: any) => Promise<any>; env?: NodeJS.ProcessEnv;
+  killFileExists?: (p: string) => boolean; key?: string | null; onEvent?: (e: Record<string, unknown>) => void;
+  /** Hosted connector (2026-10-21): route only when accountId is on the "accounts on next" list. */
+  perAccount?: boolean; accountId?: string | null; accounts?: AccountsDeps; mode?: 'local' | 'hosted';
+};
 
 /** Factory so the routing + fallback logic is testable without the network. */
 export function createReadCall(deps: ReadCallDeps = {}) {
   const fetchImpl = deps.fetchImpl || globalThis.fetch;
   const fallback = deps.fallback || ((endpoint: string, options: any) => makeApiCall(endpoint, options));
-  const onEvent = deps.onEvent || ((e: Record<string, unknown>) => structuredLog.info('read-base', e));
+  const onEvent = deps.onEvent || ((e: Record<string, unknown>) => { structuredLog.info('read-base', e); recordReadTrial(e); });
+  const mode = deps.mode || (deps.perAccount ? 'hosted' : 'local');
+  const tag = (e: Record<string, unknown>) => onEvent({ mode, account: deps.accountId || null, ...e });
   return async function readCall(endpoint: string, options: any = {}) {
     const base = readBaseUrl(deps.env, deps.killFileExists);
     let body: any = null;
     try { body = options.body ? JSON.parse(options.body) : null; } catch { body = null; }
     if (!base || !readBaseEligible(body)) return fallback(endpoint, options);
+    // Per-account gate (hosted): an unlisted or unknown account takes the live path untouched, and is not recorded.
+    if (deps.perAccount && !accountOnNext(deps.accountId, deps.accounts || { env: deps.env })) return fallback(endpoint, options);
     const key = deps.key !== undefined ? deps.key : getEffectiveApiKey();
     if (!key) return fallback(endpoint, options);
     const started = Date.now();
@@ -450,14 +460,14 @@ export function createReadCall(deps: ReadCallDeps = {}) {
       clearTimeout(timer);
       if (!r.ok) {
         const preview = (await r.text().catch(() => '')).slice(0, 200);
-        onEvent({ served_by: 'live', reason: `next HTTP ${r.status}`, tool: body.tool, ms: Date.now() - started, preview });
+        tag({ served_by: 'live', reason: `next HTTP ${r.status}`, tool: body.tool, ms: Date.now() - started, preview });
         return fallback(endpoint, options);
       }
       const data = await r.json();
-      onEvent({ served_by: 'next', tool: body.tool, ms: Date.now() - started, base });
+      tag({ served_by: 'next', tool: body.tool, ms: Date.now() - started, base });
       return data;
     } catch (err: any) {
-      onEvent({ served_by: 'live', reason: `next error: ${err?.message || err}`, tool: body.tool, ms: Date.now() - started });
+      tag({ served_by: 'live', reason: `next error: ${err?.message || err}`, tool: body.tool, ms: Date.now() - started });
       return fallback(endpoint, options);
     }
   };
@@ -465,6 +475,54 @@ export function createReadCall(deps: ReadCallDeps = {}) {
 
 /** Default read call used by the read tool handlers. */
 export const makeReadCall = createReadCall();
+
+// ---- accounts on next (hosted connector, 2026-10-21) -------------------------
+// The SHARED hosted connector serves every user, so its read-base switch is
+// gated per account: only ids on this list go next-first. Sources, unioned:
+//   - env PURMEMO_NEXT_ACCOUNTS: comma-separated ids (needs a restart to change);
+//   - file PURMEMO_NEXT_ACCOUNTS_FILE, default ~/.purmemo/next-accounts.txt: one id
+//     per line, '#' comments, re-read when its mtime changes (checked at most every
+//     5 s) — so adding or removing an account needs no release and no restart.
+// The kill switches above (DISABLED=1, ~/.purmemo/read-base.off) beat the list.
+export const NEXT_ACCOUNTS_FILE = join(homedir(), '.purmemo', 'next-accounts.txt');
+const ACCOUNTS_RECHECK_MS = 5000;
+export type AccountsDeps = { env?: NodeJS.ProcessEnv; readFile?: (p: string) => string; statMtime?: (p: string) => number | null; now?: () => number };
+let _accountsCache: { file: string; mtime: number | null; checkedAt: number; ids: Set<string> } | null = null;
+
+function defaultStatMtime(p: string): number | null { try { return statSync(p).mtimeMs; } catch { return null; } }
+
+/** Ids from a comma- or newline-separated list; blanks and '#' comments dropped; case-insensitive. */
+export function parseAccountList(text: string): string[] {
+  return String(text || '').split(/[\n,]/).map((x) => x.replace(/#.*$/, '').trim().toLowerCase()).filter(Boolean);
+}
+
+export function nextAccounts(deps: AccountsDeps = {}): Set<string> {
+  const env = deps.env || process.env;
+  const file = (env.PURMEMO_NEXT_ACCOUNTS_FILE || '').trim() || NEXT_ACCOUNTS_FILE;
+  const now = (deps.now || Date.now)();
+  const fromEnv = parseAccountList(env.PURMEMO_NEXT_ACCOUNTS || '');
+  let cache = _accountsCache;
+  if (!cache || cache.file !== file || now - cache.checkedAt >= ACCOUNTS_RECHECK_MS) {
+    const mtime = (deps.statMtime || defaultStatMtime)(file);
+    if (cache && cache.file === file && cache.mtime === mtime) {
+      cache.checkedAt = now;
+    } else {
+      let ids = new Set<string>();
+      if (mtime !== null) { try { ids = new Set(parseAccountList((deps.readFile || ((f: string) => readFileSync(f, 'utf8')))(file))); } catch { ids = new Set(); } }
+      cache = _accountsCache = { file, mtime, checkedAt: now, ids };
+    }
+  }
+  return new Set([...fromEnv, ...cache.ids]);
+}
+
+/** Forget the cached file so the next call re-reads it (tests; after editing the file by hand). */
+export function resetNextAccountsCache(): void { _accountsCache = null; }
+
+export function accountOnNext(accountId: unknown, deps: AccountsDeps = {}): boolean {
+  const id = accountId === undefined || accountId === null ? '' : String(accountId).trim().toLowerCase();
+  if (!id) return false;
+  return nextAccounts(deps).has(id);
+}
 
 // ---- past sessions (purmemo-next only, beta 2026-10-18) ---------------------
 // search_past_sessions reads raw session transcripts, which only purmemo-next

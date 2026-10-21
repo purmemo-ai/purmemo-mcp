@@ -7,7 +7,8 @@
  */
 
 import { structuredLog } from '../lib/logger.js';
-import { apiCircuitBreaker, runWithApiKey } from '../lib/api-client.js';
+import { apiCircuitBreaker, runWithApiKey, createReadCall, READ_BASE_TOOLS, nextAccounts } from '../lib/api-client.js';
+import { createHash } from 'node:crypto';
 import { escapeHtml, isSafeParams, validateRedirectUri, isAllowedRedirectTarget, buildCallbackUrl, jsStringLiteral } from './oauth-guards.js';
 import {
   handleSaveConversation,
@@ -211,6 +212,43 @@ export async function startRemoteServer(ctx) {
   }
   const BACKEND_UNAVAILABLE_JSONRPC = { code: -32000, message: 'Backend temporarily unavailable, retry shortly', data: { type: 'backend_unavailable' } };
 
+  // ── Accounts on next (per-account read routing, 2026-10-21) ──
+  // Live's /auth/me answer carries the caller's user_id; it is kept beside a
+  // hash of the key (never the key) for 24 h, so routing a read is a map
+  // lookup, not a call. ctx.readDeps lets tests inject env / kill-file / list.
+  const readDeps = ctx.readDeps || {};
+  const accountsDeps = readDeps.accounts || { env: readDeps.env };
+  const ACCOUNT_TTL_MS = 24 * 60 * 60 * 1000;
+  const ACCOUNT_CACHE_MAX = 10000;
+  const accountByKey = new Map();
+  const keyHash = (k) => createHash('sha256').update(String(k)).digest('hex');
+  function rememberAccount(key, userId) {
+    if (!key || !userId) return;
+    if (accountByKey.size >= ACCOUNT_CACHE_MAX) accountByKey.delete(accountByKey.keys().next().value);
+    accountByKey.set(keyHash(key), { id: String(userId), exp: Date.now() + ACCOUNT_TTL_MS });
+  }
+  function knownAccount(key) {
+    const h = keyHash(key); const hit = accountByKey.get(h);
+    if (!hit) return null;
+    if (hit.exp <= Date.now()) { accountByKey.delete(h); return null; }
+    return hit.id;
+  }
+  // The account id for a validated key: cached, else (only while someone is on
+  // the list) one /auth/me, else null — and null always means "live, as today".
+  async function accountIdFor(key) {
+    const known = knownAccount(key);
+    if (known) return known;
+    if (!nextAccounts(accountsDeps).size) return null;
+    try {
+      const resp = await fetch(`${API_URL}/api/v1/auth/me`, { headers: { 'Authorization': `Bearer ${key}`, 'User-Agent': USER_AGENT }, signal: AbortSignal.timeout(10000) });
+      if (!resp.ok) return null;
+      const body = await resp.json().catch(() => null);
+      const id = body?.user_id ? String(body.user_id) : null;
+      if (id) rememberAccount(key, id);
+      return id;
+    } catch { return null; }
+  }
+
   // Helper: validate API key from Authorization header.
   // Returns the (possibly refreshed) key, null if rejected, throws BackendUnavailableError if unverifiable.
   async function validateApiKeyFromRequest(req) {
@@ -222,7 +260,12 @@ export async function startRemoteServer(ctx) {
         headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': USER_AGENT },
         signal: AbortSignal.timeout(10000)
       });
-      if (resp.ok) return token;
+      if (resp.ok) {
+        // Keep the account id live just told us (per-account read routing); a body we can't read changes nothing.
+        const body = await resp.json().catch(() => null);
+        rememberAccount(token, body?.user_id);
+        return token;
+      }
       if (resp.status >= 500) throw new BackendUnavailableError(`auth/me ${resp.status}`);
       // Silent token refresh if 401 and we have a refresh token.
       // Cache MISS in-memory → fall back to durable DB store (survives restarts).
@@ -362,8 +405,29 @@ export async function startRemoteServer(ctx) {
       } catch (e) { return { content: [{ type: 'text', text: `Error: ${e.message}` }] }; }
     }
 
-    // recall_memories, get_memory_details, discover_related_conversations
-    // proxy to backend — ChatGPT widgets parse the backend's response format
+    // recall_memories, get_memory_details, discover_related_conversations:
+    // for an account on the "accounts on next" list, next first then live
+    // (same eligibility, timeout and fallback as the local read-base switch);
+    // everyone else takes proxyToLive exactly as before.
+    if (READ_BASE_TOOLS.has(toolName)) {
+      const accountId = await accountIdFor(apiKey);
+      const readCall = createReadCall({
+        key: apiKey, accountId, perAccount: true, mode: 'hosted',
+        env: readDeps.env, killFileExists: readDeps.killFileExists, accounts: accountsDeps,
+        fallback: () => proxyToLive(toolName, toolArgs, apiKey)
+      });
+      return readCall('/api/v10/mcp/tools/execute', {
+        method: 'POST', body: JSON.stringify({ tool: toolName, arguments: toolArgs }),
+        timeoutMs: 20000, headers: { 'X-MCP-Version': CLIENT_VERSION }
+      });
+    }
+    return proxyToLive(toolName, toolArgs, apiKey);
+  }
+
+  // The live path for the read tools, unchanged (2026-10-21: moved out of
+  // executeToolForRemote so the per-account switch can fall back to it).
+  // ChatGPT widgets parse the backend's response format.
+  async function proxyToLive(toolName, toolArgs, apiKey) {
     try {
       const resp = await fetch(`${API_URL}/api/v10/mcp/tools/execute`, {
         method: 'POST',
