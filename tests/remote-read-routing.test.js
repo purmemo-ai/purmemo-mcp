@@ -34,7 +34,7 @@ before(async () => {
     }
     if (u === `${NEXT}/api/v1/read-routing/me`) {
       hits.routing.push(bearer);
-      if (bearer === 'pm_slow') return new Promise(() => {}); // a lookup that never answers
+      if (bearer === 'pm_slow') return new Promise((_, reject) => { init?.signal?.addEventListener('abort', () => reject(new Error('aborted'))); }); // answers only when the connector's own 5 s limit cancels it
       return acct ? { ok: true, status: 200, json: async () => ({ ok: true, user_id: acct.id, backend: acct.backend }), text: async () => '' }
                   : { ok: false, status: 401, json: async () => ({}), text: async () => '' };
     }
