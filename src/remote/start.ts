@@ -7,7 +7,7 @@
  */
 
 import { structuredLog } from '../lib/logger.js';
-import { apiCircuitBreaker, runWithApiKey, createReadCall, READ_BASE_TOOLS, nextAccounts } from '../lib/api-client.js';
+import { apiCircuitBreaker, runWithApiKey, createReadCall, createRoutingCache, READ_BASE_TOOLS } from '../lib/api-client.js';
 import { createHash } from 'node:crypto';
 import { escapeHtml, isSafeParams, validateRedirectUri, isAllowedRedirectTarget, buildCallbackUrl, jsStringLiteral } from './oauth-guards.js';
 import {
@@ -212,12 +212,15 @@ export async function startRemoteServer(ctx) {
   }
   const BACKEND_UNAVAILABLE_JSONRPC = { code: -32000, message: 'Backend temporarily unavailable, retry shortly', data: { type: 'backend_unavailable' } };
 
-  // ── Accounts on next (per-account read routing, 2026-10-21) ──
-  // Live's /auth/me answer carries the caller's user_id; it is kept beside a
-  // hash of the key (never the key) for 24 h, so routing a read is a map
-  // lookup, not a call. ctx.readDeps lets tests inject env / kill-file / list.
+  // ── Read routing per account (2026-10-21) ──
+  // Which backend serves an account's reads is a row on the account in the
+  // shared database (next migration 032). The connector caches next's answer
+  // per key hash (createRoutingCache) and never waits for it: prefetched when a
+  // key is validated; a read with no cached answer goes to live as today. The
+  // account id from live's /auth/me body is kept the same way, only for the
+  // trial count. ctx.readDeps lets tests inject env and the kill-file check.
   const readDeps = ctx.readDeps || {};
-  const accountsDeps = readDeps.accounts || { env: readDeps.env };
+  const routing = createRoutingCache({ env: readDeps.env, killFileExists: readDeps.killFileExists });
   const ACCOUNT_TTL_MS = 24 * 60 * 60 * 1000;
   const ACCOUNT_CACHE_MAX = 10000;
   const accountByKey = new Map();
@@ -232,21 +235,6 @@ export async function startRemoteServer(ctx) {
     if (!hit) return null;
     if (hit.exp <= Date.now()) { accountByKey.delete(h); return null; }
     return hit.id;
-  }
-  // The account id for a validated key: cached, else (only while someone is on
-  // the list) one /auth/me, else null — and null always means "live, as today".
-  async function accountIdFor(key) {
-    const known = knownAccount(key);
-    if (known) return known;
-    if (!nextAccounts(accountsDeps).size) return null;
-    try {
-      const resp = await fetch(`${API_URL}/api/v1/auth/me`, { headers: { 'Authorization': `Bearer ${key}`, 'User-Agent': USER_AGENT }, signal: AbortSignal.timeout(10000) });
-      if (!resp.ok) return null;
-      const body = await resp.json().catch(() => null);
-      const id = body?.user_id ? String(body.user_id) : null;
-      if (id) rememberAccount(key, id);
-      return id;
-    } catch { return null; }
   }
 
   // Helper: validate API key from Authorization header.
@@ -264,6 +252,7 @@ export async function startRemoteServer(ctx) {
         // Keep the account id live just told us (per-account read routing); a body we can't read changes nothing.
         const body = await resp.json().catch(() => null);
         rememberAccount(token, body?.user_id);
+        routing.prefetch(token); // background; a read never waits for it
         return token;
       }
       if (resp.status >= 500) throw new BackendUnavailableError(`auth/me ${resp.status}`);
@@ -406,15 +395,18 @@ export async function startRemoteServer(ctx) {
     }
 
     // recall_memories, get_memory_details, discover_related_conversations:
-    // for an account on the "accounts on next" list, next first then live
-    // (same eligibility, timeout and fallback as the local read-base switch);
-    // everyone else takes proxyToLive exactly as before.
+    // an account whose read backend is next (per the cached routing flag) goes
+    // next first then live, with the same eligibility, timeout and fallback as
+    // the local read-base switch; everyone else takes proxyToLive exactly as before.
     if (READ_BASE_TOOLS.has(toolName)) {
-      const accountId = await accountIdFor(apiKey);
+      const backend = routing.get(apiKey);
+      if (backend === null) routing.prefetch(apiKey); // unknown → live now, next time we know
+      if (backend !== 'next') return proxyToLive(toolName, toolArgs, apiKey);
       const readCall = createReadCall({
-        key: apiKey, accountId, perAccount: true, mode: 'hosted',
-        env: readDeps.env, killFileExists: readDeps.killFileExists, accounts: accountsDeps,
-        fallback: () => proxyToLive(toolName, toolArgs, apiKey)
+        key: apiKey, accountId: knownAccount(apiKey), mode: 'hosted',
+        env: readDeps.env, killFileExists: readDeps.killFileExists,
+        fallback: () => proxyToLive(toolName, toolArgs, apiKey),
+        onReject: ({ status, preview }) => { if (status === 501 && /not_on_next/.test(preview)) routing.markLive(apiKey); }
       });
       return readCall('/api/v10/mcp/tools/execute', {
         method: 'POST', body: JSON.stringify({ tool: toolName, arguments: toolArgs }),

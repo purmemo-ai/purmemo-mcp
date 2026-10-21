@@ -8,23 +8,54 @@
  * it, a short fallback reason, milliseconds. Never the query, never memory text.
  * Unlisted accounts are never recorded (they never reach the switch).
  *
- *   file:    PURMEMO_READ_TRIAL_LOG, default ~/.purmemo/read-trial.jsonl
+ *   files:   PURMEMO_READ_TRIAL_LOG (default ~/.purmemo/read-trial.jsonl) names the base; lines go to
+ *            <base>.<YYYY-MM-DD>.jsonl, one file per UTC day, pruned after PURMEMO_READ_TRIAL_KEEP_DAYS (30).
  *   summary: `purmemo-mcp-setup trial [--days 7]` → one line per day, counts only.
  */
-import { appendFileSync, mkdirSync, readFileSync } from 'fs';
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from 'fs';
 import { homedir } from 'os';
-import { dirname, join } from 'path';
+import { basename, dirname, join } from 'path';
 
 export const READ_TRIAL_FILE = join(homedir(), '.purmemo', 'read-trial.jsonl');
+export const READ_TRIAL_KEEP_DAYS = 30;
+const DAY_MS = 86_400_000;
 
+/** The base path: PURMEMO_READ_TRIAL_LOG or ~/.purmemo/read-trial.jsonl. Lines go to <base minus .jsonl>.<YYYY-MM-DD>.jsonl. */
 export function readTrialFile(env: NodeJS.ProcessEnv = process.env): string {
   return (env.PURMEMO_READ_TRIAL_LOG || '').trim() || READ_TRIAL_FILE;
 }
+const stem = (base: string) => base.replace(/\.jsonl$/, '');
+/** Today's file for a base path: one file per UTC day, so the log is bounded by retention, never by luck. */
+export function trialFileFor(base: string, now: () => number = Date.now): string {
+  return `${stem(base)}.${new Date(now()).toISOString().slice(0, 10)}.jsonl`;
+}
+export function keepDays(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env.PURMEMO_READ_TRIAL_KEEP_DAYS); return Number.isFinite(n) && n > 0 ? Math.floor(n) : READ_TRIAL_KEEP_DAYS;
+}
+/** Every dated file for a base path (plus the legacy undated file if present), oldest first. */
+export function trialFiles(base: string): string[] {
+  const dir = dirname(base), prefix = basename(stem(base)) + '.';
+  let names: string[] = [];
+  try { names = readdirSync(dir); } catch { return []; }
+  const dated = names.filter((n) => n.startsWith(prefix) && /\.\d{4}-\d{2}-\d{2}\.jsonl$/.test(n)).sort().map((n) => join(dir, n));
+  return names.includes(basename(base)) ? [base, ...dated] : dated;
+}
+/** Delete dated files older than keep days. Called from recordReadTrial at most once an hour; errors swallowed. */
+export function pruneTrialFiles(base: string, keep: number, now: () => number = Date.now): string[] {
+  const cutoff = new Date(now() - keep * DAY_MS).toISOString().slice(0, 10);
+  const gone: string[] = [];
+  for (const f of trialFiles(base)) {
+    const m = /\.(\d{4}-\d{2}-\d{2})\.jsonl$/.exec(f);
+    if (m && m[1] < cutoff) { try { unlinkSync(f); gone.push(f); } catch { /* ignore */ } }
+  }
+  return gone;
+}
+let _lastPrune = 0;
 
 /** First 8 characters of an account id, or 'local' when the mode has no account. */
-export function shortAccount(id: unknown): string {
+export function shortAccount(id: unknown, mode: unknown = 'local'): string {
   const s = id === undefined || id === null ? '' : String(id).trim();
-  return s ? s.slice(0, 8) : 'local';
+  return s ? s.slice(0, 8) : (mode === 'hosted' ? 'unknown' : 'local');
 }
 
 /** A fallback reason reduced to a few fixed words — no bodies, no previews. */
@@ -43,7 +74,7 @@ export function trialLine(e: Record<string, unknown>, now: () => number = Date.n
   const line: Record<string, unknown> = {
     ts: new Date(now()).toISOString(),
     mode: e.mode || 'local',
-    account: shortAccount(e.account),
+    account: shortAccount(e.account, e.mode),
     tool: e.tool || null,
     served_by: e.served_by || null,
     ms: Number.isFinite(e.ms) ? e.ms : null,
@@ -53,14 +84,17 @@ export function trialLine(e: Record<string, unknown>, now: () => number = Date.n
   return line;
 }
 
-type RecordDeps = { file?: string; env?: NodeJS.ProcessEnv; append?: (file: string, text: string) => void; now?: () => number };
+type RecordDeps = { file?: string; env?: NodeJS.ProcessEnv; append?: (file: string, text: string) => void; now?: () => number; prune?: boolean };
 
-/** Append one line; any failure (no dir, read-only disk) is swallowed — counting must never break a read. */
+/** Append one line to today's file; prune old files at most once an hour. Any failure is swallowed — counting must never break a read. */
 export function recordReadTrial(e: Record<string, unknown>, deps: RecordDeps = {}): void {
   try {
-    const file = deps.file || readTrialFile(deps.env);
+    const now = deps.now || Date.now;
+    const base = deps.file || readTrialFile(deps.env);
+    const file = trialFileFor(base, now);
     const append = deps.append || ((f: string, t: string) => { mkdirSync(dirname(f), { recursive: true }); appendFileSync(f, t); });
-    append(file, JSON.stringify(trialLine(e, deps.now)) + '\n');
+    append(file, JSON.stringify(trialLine(e, now)) + '\n');
+    if (deps.prune !== false && now() - _lastPrune > 3_600_000) { _lastPrune = now(); pruneTrialFiles(base, keepDays(deps.env), now); }
   } catch { /* never throw into a read */ }
 }
 
@@ -79,7 +113,7 @@ export function summarizeReadTrial(deps: SummaryDeps = {}) {
   const since = now - days * 86_400_000;
   const file = deps.file || readTrialFile(deps.env);
   let text = deps.text;
-  if (text === undefined) { try { text = readFileSync(file, 'utf8'); } catch { text = ''; } }
+  if (text === undefined) { text = trialFiles(file).map((f) => { try { return readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n'); }
   const perDay = new Map<string, any>();
   let total = 0, bad = 0;
   for (const raw of text.split('\n')) {
