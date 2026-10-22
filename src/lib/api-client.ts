@@ -506,11 +506,13 @@ export function createRoutingCache(deps: RoutingDeps = {}) {
     if (byKey.size >= ROUTING_MAX_KEYS) byKey.delete(byKey.keys().next().value as string);
     byKey.set(hash(key), { backend, exp: now() + ttlMs });
   }
-  /** The cached backend for this key, or null when nothing fresh is known (the caller then goes to live). */
+  /** The last backend next told us for this key, or null when nothing is known yet (the caller then goes to live).
+   *  A stale answer is still returned — a read never waits for the lookup — and a refresh starts in the background.
+   *  Next enforces the flag itself (501 not_on_next → markLive), so a stale 'next' costs at most one fallback. */
   function get(key: string): Backend | null {
     const h = hash(key); const hit = byKey.get(h);
     if (!hit) return null;
-    if (hit.exp <= now()) { byKey.delete(h); return null; }
+    if (hit.exp <= now()) refresh(key, h);
     return hit.backend;
   }
   async function fetchOnce(key: string): Promise<void> {
@@ -528,13 +530,17 @@ export function createRoutingCache(deps: RoutingDeps = {}) {
       remember(key, 'live', negTtl); onEvent({ backend: 'live', reason: `routing error: ${err?.message || err}`, ms: now() - started });
     }
   }
-  /** Fire-and-forget: learn the flag in the background. Never awaited by a request. */
-  function prefetch(key: string): void {
-    if (!key || get(key) !== null) return;
-    const h = hash(key);
+  function refresh(key: string, h: string): void {
     if (inflight.has(h)) return;
     const p = fetchOnce(key).catch(() => {}).finally(() => inflight.delete(h));
     inflight.set(h, p);
+  }
+  /** Fire-and-forget: learn the flag in the background, or refresh a stale one. Never awaited by a request. */
+  function prefetch(key: string): void {
+    if (!key) return;
+    const h = hash(key); const hit = byKey.get(h);
+    if (hit && hit.exp > now()) return;
+    refresh(key, h);
   }
   /** Next said 501 not_on_next: stop trying next for this key until the flag is re-read. */
   function markLive(key: string): void { remember(key, 'live', ttl); }
