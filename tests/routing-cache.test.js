@@ -26,18 +26,29 @@ describe('createRoutingCache', () => {
     m.cache.prefetch('k1'); await m.cache.settle(); assert.equal(m.calls.length, 1, 'fresh → no new call');
     assert.equal(m.events[0].backend, 'next');
   });
-  it('a live answer is cached too; the answer expires after the TTL and is re-fetched on the next prefetch', async () => {
+  it('a live answer is cached too; after the TTL the last answer is still served and a refresh starts in the background', async () => {
     const m = make(answer('live'));
     m.cache.prefetch('k2'); await m.cache.settle(); assert.equal(m.cache.get('k2'), 'live');
-    m.tick(ROUTING_TTL_MS + 1); assert.equal(m.cache.get('k2'), null);
-    m.cache.prefetch('k2'); await m.cache.settle(); assert.equal(m.calls.length, 2);
+    m.tick(ROUTING_TTL_MS + 1); assert.equal(m.cache.get('k2'), 'live', 'stale answer still served, never null');
+    assert.equal(m.calls.length, 2, 'the stale read started a refresh'); await m.cache.settle();
+    m.cache.prefetch('k2'); await m.cache.settle(); assert.equal(m.calls.length, 2, 'fresh again → no new call');
+  });
+  it('a stale next is served until the refresh lands; when next now says live, the next read goes to live', async () => {
+    let n = 0; const m = make(async () => answer(n++ === 0 ? 'next' : 'live')());
+    m.cache.prefetch('k2b'); await m.cache.settle(); assert.equal(m.cache.get('k2b'), 'next');
+    m.tick(ROUTING_TTL_MS + 1);
+    assert.equal(m.cache.get('k2b'), 'next', 'first read after expiry: stale next, not live');
+    await m.cache.settle(); assert.equal(m.cache.get('k2b'), 'live', 'refresh landed'); assert.equal(m.calls.length, 2);
+  });
+  it('a restart (empty cache) is the only time a read goes to live for lack of an answer', () => {
+    const m = make(answer('next')); assert.equal(m.cache.get('k2c'), null);
   });
   it('a failed lookup (network, 5xx, garbage body) reads as live for a minute, then is retried', async () => {
     for (const bad of [async () => { throw new Error('ECONNREFUSED'); }, answer('next', 503), async () => ({ ok: true, status: 200, json: async () => ({ nope: 1 }), text: async () => '' })]) {
       const m = make(bad);
       m.cache.prefetch('k3'); await m.cache.settle();
       assert.equal(m.cache.get('k3'), 'live'); assert.match(m.events[0].reason, /routing/);
-      m.tick(ROUTING_NEG_TTL_MS + 1); assert.equal(m.cache.get('k3'), null);
+      m.tick(ROUTING_NEG_TTL_MS + 1); assert.equal(m.cache.get('k3'), 'live', 'still live while the retry runs'); assert.equal(m.calls.length, 2, 'retried after a minute'); await m.cache.settle();
     }
   });
   it('two prefetches in flight for one key make one call', async () => {
