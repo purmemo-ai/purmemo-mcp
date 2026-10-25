@@ -9,7 +9,8 @@
     "purmemo": "./dist/server.js",
     "purmemo-mcp": "./dist/server.js",
     "purmemo-mcp-setup": "./dist/setup.js",
-    "purmemo-mcp-hooks": "./dist/setup.js"
+    "purmemo-mcp-hooks": "./dist/setup.js",
+    "purmemo-ops": "./dist/ops.js"
   },
   "files": [
     "dist/",

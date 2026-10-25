@@ -6,6 +6,7 @@
  * Call initHandlers() once at startup to inject server-scoped dependencies.
  */
 
+import { isAlternateAccountScope } from '../auth/accounts.js';
 import { appendFileSync } from 'node:fs';
 import { structuredLog } from '../lib/logger.js';
 import { makeApiCall, sanitizeUnicode, safeErrorMessage, wafSafeBody, getEffectiveApiKey, makeReadCall } from '../lib/api-client.js';
@@ -130,6 +131,10 @@ function fireShadowDoor(content: string, saveResult?: any): void {
     // save is not mirrored twice. The RECALL mirror below (fireShadowRecall)
     // is unaffected — it still needs the URL/token. No-op for everyone else.
     if (process.env.PURMEMO_SHADOW_SAVE_DISABLED === '1') return;
+    // The shadow door files under one fixed identity (PURMEMO_SHADOW_USER_ID). A call running on another
+    // signed-in account (tools/accounts.ts) must never be mirrored there: that would copy, say, work
+    // content into the personal shadow (judged debate debate3-1792966568, 2026-10-25).
+    if (isAlternateAccountScope()) { shadowLog('shadow skip other-account'); return; }
 
     const sourceKey = deriveSourceKey(saveResult);
     if (!sourceKey) {
@@ -186,6 +191,7 @@ function fireShadowRecall(query: string, limit: number): void {
     const token = process.env.PURMEMO_SHADOW_DOOR_TOKEN;
     if (!url || !token) return; // flag off → exact current behavior, no-op.
     if (!query || typeof query !== 'string') return; // nothing meaningful to mirror.
+    if (isAlternateAccountScope()) return; // never mirror another account's query into the fixed-identity shadow.
 
     // The env URL points at .../door/save; /recall is its sibling route.
     const recallUrl = `${url.replace(/\/save$/, '')}/recall`;
