@@ -65,8 +65,11 @@ import {
   safeErrorMessage,
   sanitizeUnicode,
   makeApiCall,
-  getEffectiveApiKey
+  getEffectiveApiKey,
+  runWithApiKey
 } from './lib/api-client.js';
+import { withAccountTools, callOnAccount, transferToolDefinition, handleTransferMemory, TRANSFER_TOOL_NAME } from './tools/accounts.js';
+import { multiAccountEnabled } from './auth/accounts.js';
 import {
   initHandlers,
   handleSaveConversation,
@@ -1642,7 +1645,9 @@ RETURNS:
 ];
 
 // What tools/list returns for this process (core by default; env flags add groups).
-const VISIBLE_TOOLS = visibleTools(TOOLS);
+// Several accounts signed in on this machine (local mode only) → account-aware tools get an `account`
+// property and transfer_memory is listed (tools/accounts.ts). One account → exactly the list above.
+const VISIBLE_TOOLS = withAccountTools(visibleTools(TOOLS), transferToolDefinition());
 const TOOL_FLAGS = toolFlags();
 
 const CORE_INSTRUCTIONS = `Purmemo is a cross-platform AI conversation memory system. Use these tools to save and search conversations across ChatGPT, Claude, Gemini, and other platforms.
@@ -1850,6 +1855,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const hidden = hiddenToolResult(name);
   if (hidden) return hidden;
 
+  if (name === TRANSFER_TOOL_NAME) {
+    if (!multiAccountEnabled()) {
+      return { content: [{ type: 'text', text: '❌ transfer_memory needs two or more purmemo accounts signed in on this machine (local connector only). Add one with: purmemo-mcp-setup add' }], isError: true };
+    }
+    return withUpdateNotice(await handleTransferMemory(args, { makeApiCall, runWithApiKey }));
+  }
+
+  // An `account` argument runs this one call on another signed-in account (tools/accounts.ts).
+  return callOnAccount(name, args, runWithApiKey, (callArgs) => dispatchTool(name, callArgs));
+});
+
+async function dispatchTool(name, args) {
   switch (name) {
     case 'save_conversation':
       return withUpdateNotice(await handleSaveConversation(args));
@@ -1919,7 +1936,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }]
       };
   }
-});
+}
 
 // ============================================================================
 // TIER 4: Resource Handlers (MCP 2025-11-25)
