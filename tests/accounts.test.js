@@ -191,6 +191,11 @@ describe('transfer_memory', () => {
     assert.deepEqual(r.keys, [`tok-${B}`]);
     assert.equal(a.calls.find((c) => c.method === 'POST').body.destination_credential, `tok-${A}`);
   });
+  it('bindAlways (purmemo-ops) binds the source key even for the default account', async () => {
+    const r = recorder(); const a = api();
+    await handleTransferMemory({ memoryId: UUID, to_account: B, from_account: A }, { makeApiCall: a.makeApiCall, runWithApiKey: r.run, bindAlways: true });
+    assert.deepEqual(r.keys, [`tok-${A}`]);
+  });
   it('refuses multi-part documents without moving anything', async () => {
     const a = api({ id: UUID, conversation_id: 'big-doc:part:2' });
     const res = await handleTransferMemory({ memoryId: UUID, to_account: B }, { makeApiCall: a.makeApiCall, runWithApiKey: recorder().run });

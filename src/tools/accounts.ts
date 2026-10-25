@@ -4,7 +4,7 @@
  * and the transfer_memory tool. The rules live in ../auth/accounts.ts.
  */
 import {
-  runAsAccount, AccountSelectorError, auditAccountUse, destinationCredential, defaultAccount,
+  runAsAccount, runBoundToAccount, AccountSelectorError, auditAccountUse, destinationCredential, defaultAccount,
   validateSelector, accountProperty, signedInAccounts, multiAccountEnabled,
 } from '../auth/accounts.js';
 
@@ -83,7 +83,7 @@ export function transferToolDefinition() {
  * then POST /api/v1/memories/:id/transfer as the source with the destination's credential.
  * `makeApiCall` is injected (it already honours the per-call key) so this is testable offline.
  */
-export async function handleTransferMemory(args: any, deps: { makeApiCall: Function; runWithApiKey: Function }) {
+export async function handleTransferMemory(args: any, deps: { makeApiCall: Function; runWithApiKey: Function; bindAlways?: boolean }) {
   const a = args || {};
   const id = String(a.memoryId || a.memory_id || '').trim();
   if (!UUID.test(id)) return text('❌ memoryId must be a memory UUID (an ordinal like "1" is not accepted for a move).', true);
@@ -100,7 +100,9 @@ export async function handleTransferMemory(args: any, deps: { makeApiCall: Funct
   if (to === from) return text(`❌ The memory is already in ${from}.`, true);
 
   try {
-    const { result } = await runAsAccount(from, deps.runWithApiKey, async () => {
+    // bindAlways: a program with no process-wide key (purmemo-ops) binds the source key even for the default account.
+    const run = deps.bindAlways ? runBoundToAccount : runAsAccount;
+    const { result } = await run(from, deps.runWithApiKey, async () => {
       const mem = await deps.makeApiCall(`/api/v1/memories/${id}/`, { method: 'GET' });
       const conv = String(mem?.conversation_id || mem?.metadata?.conversationId || '');
       const linked = mem?.metadata?.totalParts || mem?.metadata?.total_parts || mem?.metadata?.isChunked;

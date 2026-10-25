@@ -14,6 +14,7 @@
  *
  * Exit codes: 0 ok, 2 bad arguments / account refused (no network call made), 3 API error.
  */
+import { writeSync } from 'node:fs';
 import { initApiClient, makeApiCall, runWithApiKey, wafSafeBody } from './lib/api-client.js';
 import {
   AccountSelectorError, auditAccountUse, defaultAccount, runBoundToAccount, signedInAccounts, multiAccountEnabled,
@@ -23,7 +24,8 @@ import { handleTransferMemory } from './tools/accounts.js';
 const APPEND_MAX = 15000;
 
 function out(obj: unknown, code = 0): never {
-  process.stdout.write(JSON.stringify(obj) + '\n');
+  // Synchronous: process.stdout.write to a pipe is async on macOS and process.exit would drop it.
+  writeSync(1, JSON.stringify(obj) + '\n');
   process.exit(code);
 }
 
@@ -109,7 +111,7 @@ async function main() {
         if (opts.yes !== true) out({ ok: false, error: 'a move needs --yes (the caller must have the owner\'s explicit OK)' }, 2);
         const r = await handleTransferMemory(
           { memoryId: need(opts, 'id'), to_account: need(opts, 'to'), from_account: need(opts, 'from') },
-          { makeApiCall, runWithApiKey },
+          { makeApiCall, runWithApiKey, bindAlways: true },
         );
         const msg = r?.content?.[0]?.text || '';
         out({ ok: !r?.isError, message: msg }, r?.isError ? 3 : 0);
