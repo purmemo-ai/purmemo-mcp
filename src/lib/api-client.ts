@@ -409,7 +409,12 @@ import { existsSync } from 'fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'os';
 import { join } from 'path';
-import { recordReadTrial } from './read-trial.js';
+import { recordReadTrial, shortAccount } from './read-trial.js';
+
+/** A read-base event as written to the server log: the account id shortened to 8 chars, like the trial file (2026-10-25). */
+export function readBaseLogFields(e: Record<string, unknown>): Record<string, unknown> {
+  return 'account' in e ? { ...e, account: shortAccount(e.account, e.mode) } : e;
+}
 
 export const READ_BASE_TOOLS = new Set(['recall_memories', 'get_memory_details', 'discover_related_conversations']);
 export const READ_BASE_KILL_FILE = join(homedir(), '.purmemo', 'read-base.off');
@@ -443,7 +448,7 @@ type ReadCallDeps = {
 export function createReadCall(deps: ReadCallDeps = {}) {
   const fetchImpl = deps.fetchImpl || globalThis.fetch;
   const fallback = deps.fallback || ((endpoint: string, options: any) => makeApiCall(endpoint, options));
-  const onEvent = deps.onEvent || ((e: Record<string, unknown>) => { structuredLog.info('read-base', e); recordReadTrial(e); });
+  const onEvent = deps.onEvent || ((e: Record<string, unknown>) => { structuredLog.info('read-base', readBaseLogFields(e)); recordReadTrial(e); });
   const mode = deps.mode || 'local';
   const tag = (e: Record<string, unknown>) => onEvent({ mode, account: deps.accountId || null, ...e });
   return async function readCall(endpoint: string, options: any = {}) {
