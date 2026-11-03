@@ -75,8 +75,9 @@ function readPinned(cwd: string | undefined): Pinned[] {
 }
 
 /** One line per pinned document: title, age, and where the last update came from. */
-function describePinned(p: Pinned, m: Record<string, unknown> | null): { line: string; stale: boolean } {
+function describePinned(p: Pinned, m: Record<string, unknown> | null | undefined): { line: string; stale: boolean } {
   const label = p.label ? `${p.label}: ` : '';
+  if (m === undefined) return { line: `• ${label}${p.conversationId} — not checked (pūrmemo could not be reached)`, stale: true };
   if (!m) return { line: `• ${label}${p.conversationId} — NOT FOUND (id typo, or it lives in another account)`, stale: true };
   // Freshness = when the CONTENT last changed. content_updated_at moves only on
   // content/title edits (server trigger); user_updated_at was not bumped by
@@ -352,6 +353,24 @@ async function main(): Promise<void> {
     apiGet(apiKey, `/api/v1/todos?limit=${MAX_TODOS}`).catch(() => null),
     getAccountSnapshot(apiKey),
   ]);
+  // apiGet returns null on ANY failure (network, timeout, 4xx/5xx). A failed
+  // fetch must never be reported as "no memories" or pinned documents as "NOT
+  // FOUND": that turns an outage (e.g. a session resumed seconds before the
+  // server finished booting) into a false claim about the user's data. Say it
+  // was unreachable and stop; the next session or an explicit recall retries.
+  if (memResult === null) {
+    const msg = `pūrmemo could not be reached just now (server starting up or offline), so memories and pinned documents were not loaded for this session. Nothing is lost — ask to recall once it is back.`;
+    const payload: Record<string, unknown> = {
+      hookSpecificOutput: { hookEventName: platformEvent('SessionStart', platform) },
+      systemMessage: msg,
+    };
+    if (platform !== 'gemini') {
+      (payload.hookSpecificOutput as Record<string, unknown>).additionalContext =
+        `[pūrmemo unreachable at session start — pinned documents and recent memories NOT loaded. Do not treat their absence as missing data; recall them on demand when pūrmemo is back.]`;
+    }
+    process.stdout.write(JSON.stringify(payload));
+    return;
+  }
   const fetchedMemories = (memResult as { memories?: Array<Record<string, unknown>> })?.memories || [];
   // Observations never take a front-door slot (see OBSERVATION_SOURCE_TYPES).
   const observationCount = fetchedMemories.filter(isObservation).length;
@@ -363,11 +382,12 @@ async function main(): Promise<void> {
   const pinnedRows = await Promise.all(pinned.map(async (p) => {
     try {
       const q = new URLSearchParams({ conversation_id: p.conversationId, limit: '1' });
-      const r = await apiGet(apiKey, `/api/v1/memories/?${q}`) as { memories?: Array<Record<string, unknown>> };
-      return describePinned(p, r?.memories?.[0] ?? null);
+      const r = await apiGet(apiKey, `/api/v1/memories/?${q}`) as { memories?: Array<Record<string, unknown>> } | null;
+      if (r === null) return describePinned(p, undefined); // request failed: unknown, not "not found"
+      return describePinned(p, r.memories?.[0] ?? null);
     } catch (e) {
       dbg(TAG, `pinned fetch failed ${p.conversationId}: ${e instanceof Error ? e.message : e}`);
-      return describePinned(p, null);
+      return describePinned(p, undefined);
     }
   }));
   const pinnedBlock: string[] = [];
