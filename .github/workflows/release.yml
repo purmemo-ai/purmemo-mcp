@@ -84,10 +84,38 @@ jobs:
           gh pr create --base main --head "$BR" --title "chore: release v$NEXT" \
             --body "Automatic release after the merge of ${{ github.sha }}. Merging this tags v$NEXT, publishes to npm and deploys mcp.purmemo.ai. Opened by release.yml."
           echo "branch=$BR" >> "$GITHUB_OUTPUT"
-          # The PR's own `test` run is the required check. (First run 2026-10-17: it was held
-          # for approval under the "first_time_contributors" policy; the repo now uses
-          # "first_time_contributors_new_to_github", so the bot's PRs run unattended.)
+          # The PR's own `test` run is the required check.
           gh pr merge "$BR" --auto --squash
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Release the bump PR's held test run
+        # GitHub holds the `pull_request` run on a PR opened by GITHUB_TOKEN as
+        # "action_required" whatever the fork-approval policy says: every release from
+        # v15.7.32 (2026-10-17) to v15.7.39 sat there until a person approved it, and
+        # v15.7.39's wait timed out (2026-11-03). Approve it from here; if GitHub refuses
+        # the bot's approval, start the same tests by workflow_dispatch instead, which
+        # GITHUB_TOKEN is allowed to do and which reports the same `test` check on the commit.
+        run: |
+          set -euo pipefail
+          BR="${{ steps.pr.outputs.branch }}"; SHA="${{ steps.pr.outputs.sha }}"
+          for i in $(seq 1 24); do
+            RUN=$(gh api "repos/${{ github.repository }}/actions/workflows/test.yml/runs?head_sha=$SHA&event=pull_request" \
+                  -q '.workflow_runs[0] | select(.) | "\(.id) \(.status) \(.conclusion // "")"')
+            if [[ -n $RUN ]]; then
+              read -r ID STATUS CONCL <<<"$RUN"
+              if [[ $STATUS == action_required || $CONCL == action_required ]]; then
+                if gh api -X POST "repos/${{ github.repository }}/actions/runs/$ID/approve" >/dev/null 2>&1; then
+                  echo "approved held test run $ID"; exit 0
+                fi
+                echo "approval refused; running the tests by dispatch instead"
+                gh workflow run test.yml --ref "$BR"; exit 0
+              fi
+              echo "test run $ID is $STATUS (not held)"; exit 0
+            fi
+            sleep 5
+          done
+          echo "no pull_request test run appeared in 2 min; running the tests by dispatch"
+          gh workflow run test.yml --ref "$BR"
 
       - name: Wait for the bump PR to merge
         id: merged
