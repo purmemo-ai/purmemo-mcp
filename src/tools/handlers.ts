@@ -530,7 +530,8 @@ export async function handleSaveConversation(args) {
   });
 
   try {
-    const rawContent = args.conversationContent || '';
+    // conversationContent is the schema name; models sometimes send content (2026-11-03: a 2.7K-char save read as 0 chars).
+    const rawContent = args.conversationContent || args.content || '';
     const content = sanitizeUnicode(rawContent);
     const contentLength = content.length;
 
@@ -1751,6 +1752,20 @@ export async function handleGetMemoryDetails(args) {
   const toolName = 'get_memory_details';
   const requestId = `${toolName}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
   const startTime = Date.now();
+
+  // Accept the id under any of its spellings. The sibling tools (share_memory, get_public_memory,
+  // report_memory) name it memory_id, so models carry that over; reading only args.memoryId turned a valid
+  // UUID into "Invalid memory ID: undefined" (2026-11-03, boss session read-back and dispatcher both hit it).
+  args = { ...args, memoryId: args.memoryId ?? args.memory_id ?? args.id };
+  if (args.memoryId == null || String(args.memoryId).trim() === '') {
+    return {
+      content: [{
+        type: 'text',
+        text: '❌ No memory ID given. Pass memoryId (a full UUID, or 1-N from the last recall_memories).'
+      }]
+    };
+  }
+  args.memoryId = String(args.memoryId).trim();
 
   // Resolve ordinal IDs ("1", "2", etc.) to UUIDs from last recall_memories result
   let resolvedId = args.memoryId;
