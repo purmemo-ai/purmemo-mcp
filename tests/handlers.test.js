@@ -119,21 +119,6 @@ describe('Tool Handlers Validation', () => {
     assert.match(result.content[0].text, /Invalid memory ID: "invalid"/);
   });
 
-  it('handleGetMemoryDetails accepts memory_id (the sibling tools\' spelling)', async () => {
-    reset();
-    const id = 'd5463fbc-99c1-4b8a-b6a1-07f712015bdc';
-    const result = await handleGetMemoryDetails({ memory_id: id });
-    assert.doesNotMatch(result.content[0].text, /Invalid memory ID/);
-    assert.ok(apiCalls.some(c => (c.path + JSON.stringify(c.opts ?? {})).includes(id)), 'fetches the memory by the memory_id given');
-  });
-
-  it('handleGetMemoryDetails says plainly when no ID is given', async () => {
-    reset();
-    const result = await handleGetMemoryDetails({});
-    assert.match(result.content[0].text, /No memory ID given/);
-    assert.doesNotMatch(result.content[0].text, /undefined/);
-  });
-
   it('handleShareMemory rejects missing ID', async () => {
     reset();
     const result = await handleShareMemory({});

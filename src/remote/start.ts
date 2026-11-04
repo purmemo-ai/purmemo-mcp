@@ -39,6 +39,7 @@ import {
 import { handleGenerateHandoffBrief } from '../tools/handoff.js';
 import { handleSearchPastSessions } from '../tools/sessions.js';
 import { hiddenToolResult } from '../lib/tool-visibility.js';
+import { checkToolInput } from '../lib/tool-input.js';
 import { saveRefreshToken, loadRefreshToken, deleteRefreshToken } from './refresh-token-store.js';
 import { reportIncident } from '../lib/incident-reporter.js';
 
@@ -353,6 +354,15 @@ export async function startRemoteServer(ctx) {
     // Paused or admin tool called while hidden → say what to use instead.
     const hidden = hiddenToolResult(toolName);
     if (hidden) return hidden;
+
+    // One input check against the tool's published schema (lib/tool-input.ts) — also covers the
+    // read tools below, whose arguments are forwarded to the backend untouched.
+    const checked = checkToolInput(toolName, toolArgs, TOOLS);
+    if (checked.mapped.length || checked.unknown.length) {
+      structuredLog.warn('tool input: mapped or unknown arguments', { tool: toolName, mapped: checked.mapped, unknown: checked.unknown });
+    }
+    if (checked.error) return checked.error;
+    toolArgs = checked.args;
 
     // Tools that MUST be handled locally (not available on backend)
     const localOnlyHandlers = {
