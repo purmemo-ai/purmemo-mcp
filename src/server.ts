@@ -104,6 +104,7 @@ import {
 import { handleGenerateHandoffBrief } from './tools/handoff.js';
 import { handleSearchPastSessions } from './tools/sessions.js';
 import { visibleTools, hiddenToolResult, toolFlags } from './lib/tool-visibility.js';
+import { checkToolInput } from './lib/tool-input.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
@@ -1844,7 +1845,8 @@ function withUpdateNotice(result) {
 }
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
+  const { name } = request.params;
+  let args = request.params.arguments;
 
   // Track tool usage (for remote mode health endpoint)
   if (typeof toolCallCounts !== 'undefined') {
@@ -1854,6 +1856,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   // Paused or admin tool called while hidden → say what to use instead.
   const hidden = hiddenToolResult(name);
   if (hidden) return hidden;
+
+  // One input check against the tool's published schema (lib/tool-input.ts).
+  const checked = checkToolInput(name, args, [...TOOLS, transferToolDefinition()]);
+  if (checked.mapped.length || checked.unknown.length) {
+    structuredLog.warn('tool input: mapped or unknown arguments', { tool: name, mapped: checked.mapped, unknown: checked.unknown });
+  }
+  if (checked.error) return checked.error;
+  args = checked.args;
 
   if (name === TRANSFER_TOOL_NAME) {
     if (!multiAccountEnabled()) {
