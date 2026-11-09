@@ -38,7 +38,8 @@ import {
 } from '../tools/handlers.js';
 import { handleGenerateHandoffBrief } from '../tools/handoff.js';
 import { handleSearchPastSessions } from '../tools/sessions.js';
-import { hiddenToolResult } from '../lib/tool-visibility.js';
+import { hiddenToolResult, visibleTools, gatedToolResult, GATED_TOOLS } from '../lib/tool-visibility.js';
+import { createFeaturesCache } from '../lib/features.js';
 import { checkToolInput } from '../lib/tool-input.js';
 import { saveRefreshToken, loadRefreshToken, deleteRefreshToken } from './refresh-token-store.js';
 import { reportIncident } from '../lib/incident-reporter.js';
@@ -222,6 +223,14 @@ export async function startRemoteServer(ctx) {
   // trial count. ctx.readDeps lets tests inject env and the kill-file check.
   const readDeps = ctx.readDeps || {};
   const routing = createRoutingCache({ env: readDeps.env, killFileExists: readDeps.killFileExists });
+  // ── What each account gets (2026-11-09) ──
+  // One process serves every account, so which gated tools a caller sees is decided per caller, by the account's
+  // features (plan + invite grants, resolved by next; cached per key hash in lib/features.ts). Warmed when a key
+  // is validated. Unknown = gated tools hidden and refused; the core tools never ask. TOOLS (from server.ts) is
+  // everything this process could list for some account.
+  const toolEnv = readDeps.env || process.env;
+  const accountFeatures = createFeaturesCache({ env: readDeps.env, userAgent: USER_AGENT });
+  const toolsFor = (features) => visibleTools(TOOLS, toolEnv, features);
   const ACCOUNT_TTL_MS = 24 * 60 * 60 * 1000;
   const ACCOUNT_CACHE_MAX = 10000;
   const accountByKey = new Map();
@@ -254,6 +263,7 @@ export async function startRemoteServer(ctx) {
         const body = await resp.json().catch(() => null);
         rememberAccount(token, body?.user_id);
         routing.prefetch(token); // background; a read never waits for it
+        accountFeatures.prefetch(token); // background; warm before the client asks for its tool list
         return token;
       }
       if (resp.status >= 500) throw new BackendUnavailableError(`auth/me ${resp.status}`);
@@ -292,6 +302,7 @@ export async function startRemoteServer(ctx) {
                 // Same account, new key: keep the account id for the trial count and learn the flag for the new key.
                 rememberAccount(newToken, knownAccount(token));
                 routing.prefetch(newToken);
+                accountFeatures.prefetch(newToken);
                 return newToken;
               }
             }
@@ -354,6 +365,13 @@ export async function startRemoteServer(ctx) {
     // Paused or admin tool called while hidden → say what to use instead.
     const hidden = hiddenToolResult(toolName);
     if (hidden) return hidden;
+
+    // A gated tool runs only for an account that holds its feature (and whose switch is on). Features that
+    // cannot be confirmed = refused in plain words; next enforces the same gate on its own routes.
+    if (GATED_TOOLS[toolName]) {
+      const blocked = gatedToolResult(toolName, toolEnv, apiKey ? await accountFeatures.resolve(apiKey) : null);
+      if (blocked) return blocked;
+    }
 
     // One input check against the tool's published schema (lib/tool-input.ts) — also covers the
     // read tools below, whose arguments are forwarded to the backend untouched.
@@ -603,9 +621,16 @@ export async function startRemoteServer(ctx) {
         return sendJSON(res, { jsonrpc: '2.0', id: requestId, result: {} });
       }
 
-      // ── tools/list (PUBLIC — no auth required) ──
+      // ── tools/list (no auth required; per account when the caller is known) ──
+      // The caller is known by its session, else by its bearer key (next checks the key when asked for the
+      // features; an invalid key simply resolves to unknown). Unknown or anonymous = the core tools only.
       if (method === 'tools/list') {
-        return sendJSON(res, { jsonrpc: '2.0', id: requestId, result: { tools: TOOLS } });
+        const listSid = req.headers['mcp-session-id'] || req.headers['Mcp-Session-Id'];
+        const listSess = listSid && mcpSessions.get(listSid);
+        const auth = req.headers.authorization;
+        const listKey = listSess?.token || (auth && auth.startsWith('Bearer ') ? auth.split(' ')[1] : null);
+        const features = listKey ? await accountFeatures.resolve(listKey) : null;
+        return sendJSON(res, { jsonrpc: '2.0', id: requestId, result: { tools: toolsFor(features) } });
       }
 
       // ── Auth required for remaining methods ──
@@ -1020,7 +1045,7 @@ export async function startRemoteServer(ctx) {
         mcp: '/mcp/messages',
         health: '/health'
       },
-      tools: TOOLS.map(t => ({ name: t.name, description: t.description.split('\n')[0] })),
+      tools: toolsFor(null).map(t => ({ name: t.name, description: t.description.split('\n')[0] })),
       contact: { email: 'support@purmemo.ai', documentation: 'https://docs.purmemo.ai/mcp' }
     });
   });
