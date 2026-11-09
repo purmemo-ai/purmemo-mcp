@@ -103,7 +103,8 @@ import {
 } from './tools/handlers.js';
 import { handleGenerateHandoffBrief } from './tools/handoff.js';
 import { handleSearchPastSessions } from './tools/sessions.js';
-import { visibleTools, hiddenToolResult, toolFlags } from './lib/tool-visibility.js';
+import { visibleTools, listableTools, gatedToolResult, hiddenToolResult, toolFlags, GATED_TOOLS } from './lib/tool-visibility.js';
+import { createFeaturesCache } from './lib/features.js';
 import { checkToolInput } from './lib/tool-input.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
@@ -1645,11 +1646,15 @@ RETURNS:
   }
 ];
 
-// What tools/list returns for this process (core by default; env flags add groups).
-// Several accounts signed in on this machine (local mode only) → account-aware tools get an `account`
-// property and transfer_memory is listed (tools/accounts.ts). One account → exactly the list above.
-const VISIBLE_TOOLS = withAccountTools(visibleTools(TOOLS), transferToolDefinition());
+// Everything this PROCESS could list for some account: the core, the gated tools whose switch is on, and any
+// operator-enabled group (lib/tool-visibility.ts). What one account actually sees is cut from this per caller,
+// by the account's features (lib/features.ts): toolsForAccount below (local) and tools/list in remote/start.ts.
+const LISTABLE_TOOLS = listableTools(TOOLS);
 const TOOL_FLAGS = toolFlags();
+const accountFeatures = createFeaturesCache({ userAgent: `purmemo-mcp/${CLIENT_VERSION}` });
+// Several accounts signed in on this machine (local mode only) → account-aware tools get an `account`
+// property and transfer_memory is listed (tools/accounts.ts). One account → exactly the visible list.
+const toolsForAccount = (features) => withAccountTools(visibleTools(LISTABLE_TOOLS, process.env, features), transferToolDefinition());
 
 const CORE_INSTRUCTIONS = `Purmemo is a cross-platform AI conversation memory system. Use these tools to save and search conversations across ChatGPT, Claude, Gemini, and other platforms.
 
@@ -1657,9 +1662,8 @@ CORE WORKFLOW:
 1. save_conversation — Save COMPLETE conversations as memory. Same title (or conversationId) targets the existing memory. The 'mode' parameter controls update behavior: mode='replace' (default) overwrites; mode='append' concatenates with a timestamped separator. The /save skill sets mode='append' automatically. Include every message verbatim (minimum 500 chars, expect thousands). Server auto-chunks content >15K chars and forwards mode to each chunk.
 2. recall_memories — Search memories with semantic ranking. Use Phase 2 filters (entity, has_observations, initiative, intent) for precision. Default hybrid search covers most cases.
 3. get_memory_details — Retrieve full memory content including all linked chunks for multi-part conversations.
-4. what_changed — What facts about a project, machine or person were true and then replaced, with dates.
-5. get_user_context — Who the user is and what they are working on; call at the start of a session.${TOOL_FLAGS.beta ? `
-6. search_past_sessions — Search the raw transcripts of past sessions for what was actually said or decided.` : ''}
+4. get_user_context — Who the user is and what they are working on; call at the start of a session.
+Other tools may be listed when the account has them; each one describes itself.
 
 KEY PATTERNS:
 - Update semantics: Same title = targets the existing memory. mode='replace' overwrites; mode='append' adds a timestamped section below prior content. Pick based on whether you want history visible inline.
@@ -1703,7 +1707,7 @@ BEST PRACTICES:
 const server = new Server(
   { name: 'purmemo-mcp', version: CLIENT_VERSION },
   {
-    capabilities: { tools: {}, resources: {}, prompts: {} },
+    capabilities: { tools: { listChanged: true }, resources: {}, prompts: {} },
     instructions: TOOL_FLAGS.legacy ? LEGACY_INSTRUCTIONS : CORE_INSTRUCTIONS
   }
 );
@@ -1833,7 +1837,39 @@ const PROMPTS = [
 // Tool handlers extracted to ./tools/handlers.ts
 
 // Setup server
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: VISIBLE_TOOLS }));
+// tools/list is per account: the default signed-in account's features decide which gated tools are listed.
+// Features unknown (next did not answer in time) → gated tools stay hidden now; the lookup is retried in the
+// background and the client is told the list changed once they are known, so no restart is needed.
+let _lastListed = null;
+let _recheckTimer = null;
+const listedNames = (features) => toolsForAccount(features).map((t) => t.name).join(',');
+function scheduleListRecheck(key, triesLeft = 10) {
+  if (_recheckTimer || triesLeft <= 0) return;
+  _recheckTimer = setTimeout(async () => {
+    _recheckTimer = null;
+    try {
+      const features = await accountFeatures.resolve(key);
+      if (!features) return scheduleListRecheck(key, triesLeft - 1);
+      if (listedNames(features) !== _lastListed) await server.sendToolListChanged();
+    } catch (err) { structuredLog.warn('tools/list recheck failed', { error_message: String(err?.message || err) }); }
+  }, 65000);
+  _recheckTimer.unref?.();
+}
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  const key = getEffectiveApiKey();
+  const features = key ? await accountFeatures.resolve(key) : null;
+  _lastListed = listedNames(features);
+  if (key && !features) scheduleListRecheck(key);
+  return { tools: toolsForAccount(features) };
+});
+
+// A gated tool is checked against the account the call actually RUNS on (with several accounts signed in, the
+// `account` argument's account): called inside callOnAccount, where the effective key is that account's.
+async function gateOnAccount(name) {
+  if (!GATED_TOOLS[name]) return null;
+  const key = getEffectiveApiKey();
+  return gatedToolResult(name, process.env, key ? await accountFeatures.resolve(key) : null);
+}
 
 // Prepend update notice to a tool result if one is set
 function withUpdateNotice(result) {
@@ -1873,7 +1909,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   // An `account` argument runs this one call on another signed-in account (tools/accounts.ts).
-  return callOnAccount(name, args, runWithApiKey, (callArgs) => dispatchTool(name, callArgs));
+  return callOnAccount(name, args, runWithApiKey, async (callArgs) => (await gateOnAccount(name)) || dispatchTool(name, callArgs));
 });
 
 async function dispatchTool(name, args) {
@@ -2273,7 +2309,7 @@ if (REMOTE_MODE) {
     API_URL,
     CLIENT_VERSION,
     PLATFORM,
-    TOOLS: VISIBLE_TOOLS,
+    TOOLS: withAccountTools(LISTABLE_TOOLS, transferToolDefinition()),
     RESOURCES,
     RESOURCE_TEMPLATES,
     PROMPTS,

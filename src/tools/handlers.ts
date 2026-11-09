@@ -3053,6 +3053,8 @@ export async function handleWhatChanged(args: any) {
   structuredLog.info('what_changed: called', { entity, base });
   try {
     const r1 = await fetch(`${base}/api/v1/entities?q=${encodeURIComponent(entity)}`, { headers, signal: AbortSignal.timeout(20000) });
+    // Next enforces the account's features itself: 403 not_on_plan (a list cached before a revoke, or an old client).
+    if (r1.status === 403) return { content: [{ type: 'text', text: 'what_changed is not part of your plan.' }], isError: true };
     if (!r1.ok) throw new Error(`entities lookup HTTP ${r1.status}`);
     const found = await r1.json();
     const hits = found?.entities || [];

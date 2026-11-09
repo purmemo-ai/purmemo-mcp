@@ -1,7 +1,10 @@
 /**
- * Tool visibility (2026-10-18): everyone sees a small core; env flags add the
- * sessions beta, the admin tools, or every paused tool. A paused tool called
- * while hidden answers with what to use instead.
+ * Tool visibility (2026-10-18): everyone sees a small core; operator flags add
+ * the admin tools or every paused tool. A paused tool called while hidden
+ * answers with what to use instead. Since 2026-11-09 the gated tools
+ * (what_changed, search_past_sessions) follow the ACCOUNT's features: those
+ * tests are in account-features.test.js. Here no account is signed in, so
+ * gated tools never show, whatever the flags say.
  *
  * The list tests run the BUILT server over stdio (the real TOOLS array and the
  * real ListTools / CallTool handlers), with a throwaway HOME and a fake key so
@@ -22,7 +25,9 @@ const SERVER = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'serv
 function rpc(extraEnv, requests) {
   return new Promise((resolve, reject) => {
     const home = mkdtempSync(join(tmpdir(), 'purmemo-vis-'));
-    const env = { PATH: process.env.PATH, HOME: home, PURMEMO_API_KEY: 'test-key-not-real', PURMEMO_API_URL: 'http://127.0.0.1:9', NODE_ENV: 'production', ...extraEnv };
+    // PURMEMO_CONFIG_DIR: an empty profile dir (os.homedir() ignores HOME on macOS, so HOME alone would read the
+    // developer's real sign-in). PURMEMO_NEXT_URL: nothing listens there, so no test reaches the real service.
+    const env = { PATH: process.env.PATH, HOME: home, PURMEMO_CONFIG_DIR: join(home, '.purmemo'), PURMEMO_NEXT_URL: 'http://127.0.0.1:9', PURMEMO_API_KEY: 'test-key-not-real', PURMEMO_API_URL: 'http://127.0.0.1:9', NODE_ENV: 'production', ...extraEnv };
     const child = spawn(process.execPath, [SERVER], { env, stdio: ['pipe', 'pipe', 'pipe'] });
     const want = new Set(requests.filter((r) => r.id !== undefined).map((r) => r.id));
     const got = {};
@@ -53,18 +58,17 @@ function rpc(extraEnv, requests) {
 const listNames = async (env) => (await rpc(env, [{ id: 1, method: 'tools/list' }]))[1].result.tools.map((t) => t.name);
 
 describe('tools/list by env flag (built server over stdio)', () => {
-  it('default lists exactly the five core tools', async () => {
+  it('default lists exactly the four core tools', async () => {
     assert.deepEqual((await listNames({})).sort(), [...CORE_TOOLS].sort());
   });
-  it('PURMEMO_SESSIONS_BETA=1 adds search_past_sessions and points recall_memories at it', async () => {
+  it('PURMEMO_SESSIONS_BETA=1 alone adds nothing: the switch is a kill-switch, never a grant', async () => {
     const res = await rpc({ PURMEMO_SESSIONS_BETA: '1' }, [{ id: 1, method: 'tools/list' }]);
     const tools = res[1].result.tools;
-    assert.deepEqual(tools.map((t) => t.name).sort(), [...CORE_TOOLS, 'search_past_sessions'].sort());
-    const recall = tools.find((t) => t.name === 'recall_memories');
-    assert.match(recall.description, /use search_past_sessions\.$/);
-    const sps = tools.find((t) => t.name === 'search_past_sessions');
-    assert.equal(sps.annotations.readOnlyHint, true);
-    assert.deepEqual(sps.inputSchema.required, ['query']);
+    assert.deepEqual(tools.map((t) => t.name).sort(), [...CORE_TOOLS].sort());
+    assert.doesNotMatch(tools.find((t) => t.name === 'recall_memories').description, /search_past_sessions/);
+  });
+  it('the core list is exactly save, recall, open, context: what_changed is no longer core', () => {
+    assert.deepEqual([...CORE_TOOLS].sort(), ['get_memory_details', 'get_user_context', 'recall_memories', 'save_conversation']);
   });
   it('without the beta, recall_memories does not mention search_past_sessions', async () => {
     const res = await rpc({}, [{ id: 1, method: 'tools/list' }]);
@@ -73,10 +77,10 @@ describe('tools/list by env flag (built server over stdio)', () => {
   it('PURMEMO_ADMIN=1 adds the three admin tools', async () => {
     assert.deepEqual((await listNames({ PURMEMO_ADMIN: '1' })).sort(), [...CORE_TOOLS, ...ADMIN_TOOLS].sort());
   });
-  it('PURMEMO_LEGACY_TOOLS=1 restores every paused tool; with admin too, the full prior list of 29', async () => {
+  it('PURMEMO_LEGACY_TOOLS=1 restores every paused tool; with admin too, 28 (the two gated tools follow the account)', async () => {
     assert.deepEqual((await listNames({ PURMEMO_LEGACY_TOOLS: '1' })).sort(), [...CORE_TOOLS, ...LEGACY_TOOLS].sort());
     const all = await listNames({ PURMEMO_LEGACY_TOOLS: '1', PURMEMO_ADMIN: '1' });
-    assert.equal(all.length, 29);
+    assert.equal(all.length, 28);
     assert.deepEqual(all.sort(), [...CORE_TOOLS, ...ADMIN_TOOLS, ...LEGACY_TOOLS].sort());
   });
   it('a hidden paused tool called anyway returns the redirect, without touching the network', async () => {

@@ -34,6 +34,7 @@ export function createSearchPastSessions(call = makeSessionsCall) {
       };
     } catch (err: any) {
       structuredLog.warn('search_past_sessions: failed', { ms: Date.now() - started, status: err?.status ?? null, kind: err?.kind ?? null });
+      if (err?.status === 403) return { content: [{ type: 'text', text: 'search_past_sessions is not part of your plan.\n\nrecall_memories still works for your saved memories.' }], isError: true };
       const why = err?.status === 501 || err?.status === 404
         ? 'the sessions search is not switched on for your account yet'
         : safeErrorMessage(err);
