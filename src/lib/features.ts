@@ -87,7 +87,9 @@ export function createFeaturesCache(deps: Deps = {}) {
     const p = refresh(key, h);
     if (hit?.features) return hit.features; // a known answer that is merely due: use it, refresh in the background
     let timer: any;
-    await Promise.race([p, new Promise((r) => { timer = setTimeout(r, waitMs); timer.unref?.(); })]);
+    // The wait timer is a real handle on purpose (not unref'd): a caller awaiting it must be answered even when
+    // nothing else keeps the process alive. It is cleared as soon as the race settles.
+    await Promise.race([p, new Promise((r) => { timer = setTimeout(r, waitMs); })]);
     clearTimeout(timer);
     return byKey.get(h)?.features ?? null;
   }
