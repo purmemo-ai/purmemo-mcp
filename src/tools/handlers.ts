@@ -9,6 +9,7 @@
 import { isAlternateAccountScope } from '../auth/accounts.js';
 import { appendFileSync } from 'node:fs';
 import { structuredLog } from '../lib/logger.js';
+import { splitPageBlock } from '../lib/page-block.js';
 import { makeApiCall, sanitizeUnicode, safeErrorMessage, wafSafeBody, getEffectiveApiKey, makeReadCall } from '../lib/api-client.js';
 import {
   extractProjectContext,
@@ -1624,7 +1625,10 @@ export async function handleRecallMemories(args) {
       };
     }
 
-    const responseText = data.content[0].text;
+    // The read host may lead with the page it keeps for the thing asked about: shown unchanged above the results,
+    // and kept out of the result parsing below (src/lib/page-block.ts). No page → responseText is the whole answer.
+    const { page: pageBlock, rest: responseText } = splitPageBlock(data.content[0].text);
+    const pageSection = pageBlock ? sanitizeUnicode(pageBlock) + '\n\n' : '';
 
     const memoryBlocks = responseText.split('\n\n').filter(block => block.includes('**') && (block.includes('ID:') || block.includes('Memory ID') || block.includes('memory_id') || /[0-9a-f]{8}-[0-9a-f]{4}/.test(block)));
 
@@ -1652,7 +1656,7 @@ export async function handleRecallMemories(args) {
         : sanitizeUnicode(responseText);
 
       return {
-        content: [{ type: 'text', text: truncated }]
+        content: [{ type: 'text', text: pageSection + truncated }]
       };
     }
 
@@ -1713,7 +1717,7 @@ export async function handleRecallMemories(args) {
     resultText += `Automatically grouped by AI-organized semantic clusters!\n`;
 
     // Prepend local results if available
-    const finalSanitizedText = sanitizeUnicode(localSection + resultText);
+    const finalSanitizedText = pageSection + sanitizeUnicode(localSection + resultText);
 
     structuredLog.info(`${toolName}: completed`, {
       tool_name: toolName,
