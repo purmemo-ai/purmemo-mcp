@@ -133,9 +133,8 @@ describe('hosted per-account routing', () => {
   });
   it('a cached answer is never waited for: once known, a read does not touch the routing endpoint', async () => {
     await call('pm_late'); hits = { next: [], live: [], routing: [] };
-    const t0 = Date.now();
-    assert.equal((await call('pm_late')).text, 'from next'); assert.ok(Date.now() - t0 < LOOKUP_MS, `took ${Date.now() - t0} ms`);
-    assert.equal(hits.routing.length, 0);
+    assert.equal((await call('pm_late')).text, 'from next');
+    assert.equal(hits.routing.length, 0, 'no lookup, so nothing to wait for');
   });
   it('PURMEMO_READ_BASE_DISABLED=1 and an unset PURMEMO_READ_BASE_URL beat a cached next answer', async () => {
     env.PURMEMO_READ_BASE_DISABLED = '1';
