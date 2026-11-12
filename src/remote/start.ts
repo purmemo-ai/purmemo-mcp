@@ -217,12 +217,15 @@ export async function startRemoteServer(ctx) {
   // ── Read routing per account (2026-10-21) ──
   // Which backend serves an account's reads is a row on the account in the
   // shared database (next migration 032). The connector caches next's answer
-  // per key hash (createRoutingCache) and never waits for it: prefetched when a
-  // key is validated; a read with no cached answer goes to live as today. The
+  // per key hash (createRoutingCache): prefetched when a key is validated. A
+  // read with a cached answer never waits. A read with nothing cached (a key's
+  // first read after a restart) waits for the lookup, bounded
+  // (ROUTING_COLD_WAIT_MS), then goes to live if it still has no answer. The
   // account id from live's /auth/me body is kept the same way, only for the
-  // trial count. ctx.readDeps lets tests inject env and the kill-file check.
+  // trial count. ctx.readDeps lets tests inject env, the kill-file check and
+  // the wait bound.
   const readDeps = ctx.readDeps || {};
-  const routing = createRoutingCache({ env: readDeps.env, killFileExists: readDeps.killFileExists });
+  const routing = createRoutingCache({ env: readDeps.env, killFileExists: readDeps.killFileExists, coldWaitMs: readDeps.routingColdWaitMs });
   // ── What each account gets (2026-11-09) ──
   // One process serves every account, so which gated tools a caller sees is decided per caller, by the account's
   // features (plan + invite grants, resolved by next; cached per key hash in lib/features.ts). Warmed when a key
@@ -262,7 +265,7 @@ export async function startRemoteServer(ctx) {
         // Keep the account id live just told us (per-account read routing); a body we can't read changes nothing.
         const body = await resp.json().catch(() => null);
         rememberAccount(token, body?.user_id);
-        routing.prefetch(token); // background; a read never waits for it
+        routing.prefetch(token); // background; a first read after a restart joins this lookup (routing.resolve)
         accountFeatures.prefetch(token); // background; warm before the client asks for its tool list
         return token;
       }
@@ -430,8 +433,9 @@ export async function startRemoteServer(ctx) {
     // next first then live, with the same eligibility, timeout and fallback as
     // the local read-base switch; everyone else takes proxyToLive exactly as before.
     if (READ_BASE_TOOLS.has(toolName)) {
-      const backend = routing.get(apiKey);
-      if (backend === null) routing.prefetch(apiKey); // unknown → live now, next time we know
+      // Known (fresh or stale) → at once. Nothing cached (first read after a restart) → waits for the lookup,
+      // bounded; still unknown after that → live.
+      const backend = await routing.resolve(apiKey);
       if (backend !== 'next') return proxyToLive(toolName, toolArgs, apiKey);
       const readCall = createReadCall({
         key: apiKey, accountId: knownAccount(apiKey), mode: 'hosted',

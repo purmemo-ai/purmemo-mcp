@@ -488,20 +488,29 @@ export const makeReadCall = createReadCall();
 // database (next migration 032). Next serves it at GET /api/v1/read-routing/me
 // (the caller's own key; next resolves the account) and ENFORCES it on its MCP
 // execute path (501 not_on_next). The hosted connector only caches the answer,
-// per key hash, and never waits for it: the flag is prefetched when a key is
-// validated, a read with no cached answer goes to live exactly as today, and a
-// 501 not_on_next marks the key live at once. Nothing here applies to the local
-// (stdio) connector, whose owner controls the switch by env; next's enforcement
-// covers it anyway.
+// per key hash: the flag is prefetched when a key is validated, and a 501
+// not_on_next marks the key live at once. A read with a cached answer, fresh or
+// stale, never waits for the lookup. The one exception (2026-11-11): a read
+// with NOTHING cached for its key, which is every key's first read after a
+// restart, waits for the lookup for at most ROUTING_COLD_WAIT_MS and then
+// chooses; on a timeout or a failed lookup it goes to live as before. Without
+// that wait the first read always went to live, because the lookup starts in
+// the same request and takes ~0.3 s. Nothing here applies to the local (stdio)
+// connector, whose owner controls the switch by env; next's enforcement covers
+// it anyway.
 export const ROUTING_TTL_MS = 10 * 60 * 1000;      // a 'next'/'live' answer
 export const ROUTING_NEG_TTL_MS = 60 * 1000;       // after a failed lookup: live, retry in a minute
 export const ROUTING_MAX_KEYS = 10000;
+// How long a read with nothing cached waits for the lookup. From 920 logged hosted lookups (2026-10-21 → 11-11):
+// median 318 ms, p95 1064 ms; 97.2% finish within 1.5 s, and 2 s would add only 0.7%.
+export const ROUTING_COLD_WAIT_MS = 1500;
 export type Backend = 'next' | 'live';
-type RoutingDeps = { fetchImpl?: typeof fetch; env?: NodeJS.ProcessEnv; killFileExists?: (p: string) => boolean; now?: () => number; ttlMs?: number; negTtlMs?: number; onEvent?: (e: Record<string, unknown>) => void };
+type RoutingDeps = { fetchImpl?: typeof fetch; env?: NodeJS.ProcessEnv; killFileExists?: (p: string) => boolean; now?: () => number; ttlMs?: number; negTtlMs?: number; coldWaitMs?: number; onEvent?: (e: Record<string, unknown>) => void };
 
 export function createRoutingCache(deps: RoutingDeps = {}) {
   const now = deps.now || Date.now;
   const ttl = deps.ttlMs ?? ROUTING_TTL_MS, negTtl = deps.negTtlMs ?? ROUTING_NEG_TTL_MS;
+  const coldWait = deps.coldWaitMs ?? ROUTING_COLD_WAIT_MS;
   const onEvent = deps.onEvent || ((e: Record<string, unknown>) => structuredLog.info('read-routing', e));
   const byKey = new Map<string, { backend: Backend; exp: number }>();
   const inflight = new Map<string, Promise<void>>();
@@ -511,8 +520,8 @@ export function createRoutingCache(deps: RoutingDeps = {}) {
     if (byKey.size >= ROUTING_MAX_KEYS) byKey.delete(byKey.keys().next().value as string);
     byKey.set(hash(key), { backend, exp: now() + ttlMs });
   }
-  /** The last backend next told us for this key, or null when nothing is known yet (the caller then goes to live).
-   *  A stale answer is still returned — a read never waits for the lookup — and a refresh starts in the background.
+  /** The last backend next told us for this key, or null when nothing is known yet. Never waits.
+   *  A stale answer is still returned and a refresh starts in the background.
    *  Next enforces the flag itself (501 not_on_next → markLive), so a stale 'next' costs at most one fallback. */
   function get(key: string): Backend | null {
     const h = hash(key); const hit = byKey.get(h);
@@ -535,12 +544,33 @@ export function createRoutingCache(deps: RoutingDeps = {}) {
       remember(key, 'live', negTtl); onEvent({ backend: 'live', reason: `routing error: ${err?.message || err}`, ms: now() - started });
     }
   }
-  function refresh(key: string, h: string): void {
-    if (inflight.has(h)) return;
-    const p = fetchOnce(key).catch(() => {}).finally(() => inflight.delete(h));
-    inflight.set(h, p);
+  /** Start the lookup for a key, or join the one already in flight (one lookup per key at a time). Never rejects. */
+  function refresh(key: string, h: string): Promise<void> {
+    let p = inflight.get(h);
+    if (!p) { p = fetchOnce(key).catch(() => {}).finally(() => inflight.delete(h)); inflight.set(h, p); }
+    return p;
   }
-  /** Fire-and-forget: learn the flag in the background, or refresh a stale one. Never awaited by a request. */
+  /** The backend for a read. A cached answer, fresh or stale, is returned at once (same as get). With NOTHING
+   *  cached for the key (its first read after a restart) the read waits for the lookup, at most waitMs, and uses
+   *  the answer. null = still unknown: the caller goes to live. That happens when the switch is off (no wait at
+   *  all) or the lookup is slower than the bound (one 'cold-timeout' event; the answer still lands for later
+   *  reads). A lookup that fails is remembered as live for a minute by fetchOnce, so it returns 'live'. Never throws. */
+  async function resolve(key: string, waitMs: number = coldWait): Promise<Backend | null> {
+    if (!key) return null;
+    const h = hash(key);
+    if (byKey.has(h)) return get(key);
+    if (!readBaseUrl(deps.env, deps.killFileExists)) return null;
+    const lookup = refresh(key, h);
+    let timer: any;
+    // A real timer handle on purpose (not unref'd): the read awaiting it must be answered. Cleared once the race settles.
+    const landed = await Promise.race([lookup.then(() => true), new Promise<boolean>((r) => { timer = setTimeout(() => r(false), waitMs); })]);
+    clearTimeout(timer);
+    const hit = byKey.get(h);
+    if (hit) return hit.backend;
+    if (!landed) onEvent({ backend: 'live', reason: 'cold-timeout', waited_ms: waitMs });
+    return null;
+  }
+  /** Fire-and-forget: learn the flag in the background, or refresh a stale one. */
   function prefetch(key: string): void {
     if (!key) return;
     const h = hash(key); const hit = byKey.get(h);
@@ -551,7 +581,7 @@ export function createRoutingCache(deps: RoutingDeps = {}) {
   function markLive(key: string): void { remember(key, 'live', ttl); }
   /** Tests / draining: wait for any lookup in flight. */
   async function settle(): Promise<void> { await Promise.all([...inflight.values()]); }
-  return { get, prefetch, markLive, remember, settle, _size: () => byKey.size };
+  return { get, resolve, prefetch, markLive, remember, settle, _size: () => byKey.size };
 }
 
 // ---- past sessions (purmemo-next only, beta 2026-10-18) ---------------------
