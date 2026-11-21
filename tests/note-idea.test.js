@@ -30,6 +30,7 @@ function start() {
         const send = (status, json) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(json)); };
         if (mode === 'down') return send(503, { ok: false, error: 'internal_error' });
         if (mode === 'no-plan') return send(403, { ok: false, error: 'not_on_plan', feature: 'projects' });
+        if (mode === 'no-routes') return send(404, { ok: false, error: 'not_found' });
         if (req.url.startsWith('/api/v1/projects/resolve')) {
           const u = new URL(req.url, 'http://x');
           if (u.searchParams.get('id') === PROJECT || u.searchParams.get('repository') === 'git@github.com:coladapo/bauhaus.git') return send(200, { ok: true, answer: 'found', project: { id: PROJECT, name: 'bauhaus' } });
@@ -97,6 +98,15 @@ describe('note_idea: saved', () => {
     assert.match(r.content[0].text, /Kept as a note of what was said, not as exact words/);
   });
 
+  it('noted into another signed-in account: purmemo is told the session lives elsewhere, and the machine is not sent', async () => {
+    await createNoteIdea(call(), { env, account: () => 'work@example.com', sessionElsewhere: true })({ idea: 'Said at home, for work', session_id: 'home-session-1' });
+    const where = seen[0].body.said_in;
+    assert.match(where.account, /^session-account:/);
+    assert.deepEqual([where.machine, where.session, where.surface], [undefined, 'home-session-1', 'terminal_session']);
+    await note({ idea: 'Said on its own account' });
+    assert.deepEqual([seen[1].body.said_in.account, typeof seen[1].body.said_in.machine], [undefined, 'string']);
+  });
+
   it('refuses bad input before anything is written', async () => {
     for (const args of [{}, { idea: '   ' }, { idea: 'x', said_in: 'carrier_pigeon' }, { idea: 'x', project_id: 'bauhaus' }]) {
       const r = await note(args); assert.equal(r.isError, true, JSON.stringify(args));
@@ -153,6 +163,13 @@ describe('note_idea: pending, honestly', () => {
     assert.equal(waiting()[0].attempts, 1);
     const old = pendingSummary('default', env, Date.now() + 30 * 3600 * 1000);
     assert.deepEqual([old.count, old.oldest_hours >= 24], [3, true]);
+  });
+
+  it('a server that does not have the idea routes yet (a bare 404) is "could not ask": the idea stays pending, not refused', async () => {
+    mode = 'no-routes';
+    const r = await note({ idea: 'Before the routes are deployed', project_id: PROJECT });
+    assert.match(r.content[0].text, /NOT saved yet/);
+    assert.deepEqual([waiting().length, existsSync(join(dir, 'default', 'refused'))], [1, false]);
   });
 
   it("purmemo's own no: not saved, said plainly, and the words are kept on the device under refused/", async () => {

@@ -28,8 +28,9 @@ function refusalOf(err) {
   try { const j = JSON.parse(m ? m[1] : ''); return { code: j.error || null, message: j.message || null }; } catch { return { code: null, message: null }; }
 }
 // purmemo's own "no" to this capture. Everything else (no network, timeout, 5xx, sign-in, plan not confirmed,
-// rate limit) is "could not ask" and the capture stays pending.
-const isRefusal = (err) => [400, 404, 409, 413, 422].includes(err?.status);
+// rate limit) is "could not ask" and the capture stays pending. A 404 is a "no" only when purmemo names the
+// thing it does not hold; a bare 404 is a server that does not have these routes yet, which is "could not ask".
+const isRefusal = (err) => [400, 409, 413, 422].includes(err?.status) || (err?.status === 404 && refusalOf(err).code === 'unavailable');
 
 /**
  * Send one capture: find its project, then note the idea. → { state: 'saved' | 'pending' | 'refused', … }.
@@ -87,14 +88,19 @@ export function createNoteIdea(call = makeSessionsCall, deps: any = {}) {
     // "His exact words" is a claim: it needs the words and the session they are in. Otherwise it is a note of what he said.
     const exact = args?.exact_words === true && !!words && !!session;
     // The account this call runs on: the one named by `account`, else this machine's default sign-in.
-    const account = deps.account ? deps.account() : (currentAccountScope()?.email || defaultAccount(env) || 'default');
+    const scope = currentAccountScope();
+    const account = deps.account ? deps.account() : (scope?.email || defaultAccount(env) || 'default');
+    // Noted into ANOTHER signed-in account (a bauhaus idea said at home goes to the work account): this session
+    // is kept under this machine's default account, not the one the idea goes to. purmemo is told so, and then
+    // keeps only the kind of surface and the date there: never the machine or the session.
+    const elsewhere = deps.sessionElsewhere !== undefined ? deps.sessionElsewhere : !!(scope && !scope.isDefault);
     const remote = isRemoteMode(env);
     const capture = {
       client_id: `idea-${randomUUID()}`, id: randomUUID(), account, created_at: now().toISOString(), attempts: 0,
       project_id: projectId ? projectId.toLowerCase() : null, repository: str(args?.repository, 500),
       body: {
         title, note: str(args?.note, 4000), words, words_are: exact ? 'his_exact' : 'noted', said_at: now().toISOString(),
-        said_in: { surface, ...(remote ? {} : { machine: hostname() }), ...(session ? { session } : {}) },
+        said_in: { surface, ...(remote || elsewhere ? {} : { machine: hostname() }), ...(session ? { session } : {}), ...(elsewhere ? { account: `session-account:${defaultAccount(env) || 'default'}` } : {}) },
       },
     };
     // The hosted connector has no device to keep a file on: there the idea is saved or it is not, and it says which.
