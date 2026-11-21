@@ -7,12 +7,12 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert';
 import { createServer } from 'node:http';
-import { mkdtempSync, rmSync, readdirSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readdirSync, existsSync, readFileSync, writeFileSync, mkdirSync, utimesSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSessionsCall } from '../dist/lib/api-client.js';
 import { createNoteIdea, resendPending, sendWaitingIdeasAtStart, IDEA_SURFACES } from '../dist/tools/ideas.js';
-import { listPending, pendingSummary, accountFolder } from '../dist/lib/pending-ideas.js';
+import { listPending, readPending, writePending, pendingSummary, accountFolder, signInFingerprint } from '../dist/lib/pending-ideas.js';
 import { GATED_TOOLS, gatedToolResult, isToolVisible, CAPTURE_TOOLS } from '../dist/lib/tool-visibility.js';
 import { ACCOUNT_TOOLS } from '../dist/tools/accounts.js';
 
@@ -63,7 +63,9 @@ beforeEach(async () => {
 });
 const call = () => createSessionsCall({ env, key: 'user-key' });
 // The account is injected: on a signed-in machine the real default account would name the folder.
-const note = (args) => createNoteIdea(call(), { env, account: () => 'default' })(args);
+const FP = 'fp-of-user-key';
+const note = (args) => createNoteIdea(call(), { env, account: () => 'default', fingerprint: FP })(args);
+const resend = (account = 'default', fp = FP) => resendPending(account, call(), env, null, fp);
 const waiting = () => listPending('default', env);
 
 describe('note_idea: saved', () => {
@@ -98,13 +100,23 @@ describe('note_idea: saved', () => {
     assert.match(r.content[0].text, /Kept as a note of what was said, not as exact words/);
   });
 
-  it('noted into another signed-in account: purmemo is told the session lives elsewhere, and the machine is not sent', async () => {
-    await createNoteIdea(call(), { env, account: () => 'work@example.com', sessionElsewhere: true })({ idea: 'Said at home, for work', session_id: 'home-session-1' });
-    const where = seen[0].body.said_in;
-    assert.match(where.account, /^session-account:/);
-    assert.deepEqual([where.machine, where.session, where.surface], [undefined, 'home-session-1', 'terminal_session']);
+  it('noted into another signed-in account: only the surface and the fact that the session lives elsewhere are sent; not the machine, the session id or the other account\'s name', async () => {
+    const r = await createNoteIdea(call(), { env, account: () => 'work@example.com', sessionElsewhere: true, fingerprint: FP })({ idea: 'Said at home, for work', words: 'exactly this', exact_words: true, session_id: 'home-session-1' });
+    assert.deepEqual(seen[0].body.said_in, { surface: 'terminal_session', account: 'another-account' });
+    assert.ok(!JSON.stringify(seen.map((x) => [x.url, x.body])).includes('home-session-1'), 'the session id never leaves in a request made as the other account');
+    assert.equal(seen[0].body.words_are, 'noted');
+    assert.match(r.content[0].text, /this session belongs to another account than the idea/);
     await note({ idea: 'Said on its own account' });
     assert.deepEqual([seen[1].body.said_in.account, typeof seen[1].body.said_in.machine], [undefined, 'string']);
+  });
+
+  it('saved only when purmemo says so and gives the idea back: a polite answer that is not that keeps the idea pending', async () => {
+    for (const body of [{ ok: false }, { ok: true, saved: false }, { ok: true, saved: true }, {}]) {
+      const fake = async (endpoint) => (endpoint.startsWith('/api/v1/ideas') ? body : { ok: true, answer: 'not_known' });
+      const r = await createNoteIdea(fake, { env, account: () => 'default', fingerprint: FP })({ idea: `answer ${JSON.stringify(body)}` });
+      assert.match(r.content[0].text, /NOT saved yet: purmemo did not answer \(purmemo answered without confirming/, JSON.stringify(body));
+    }
+    assert.equal(waiting().length, 4);
   });
 
   it('refuses bad input before anything is written', async () => {
@@ -129,8 +141,8 @@ describe('note_idea: pending, honestly', () => {
     assert.match(second.content[0].text, /Waiting on this device: 2\./);
 
     await start(); // purmemo is back
-    const first = await resendPending('default', call(), env);
-    assert.deepEqual(first, { sent: 2, refused: 0, still: 0 });
+    const first = await resend();
+    assert.deepEqual(first, { sent: 2, refused: 0, still: 0, other_sign_in: 0 });
     assert.deepEqual(waiting(), []);
     assert.equal(ideas.size, 2);
     // Sent again anyway (a sweep and a restart racing): the same capture ids, so still two ideas.
@@ -156,13 +168,13 @@ describe('note_idea: pending, honestly', () => {
     assert.match((await note({ idea: 'kept through a 503' })).content[0].text, /NOT saved yet/);
     mode = 'no-plan';
     assert.match((await note({ idea: 'kept through a 403' })).content[0].text, /NOT saved yet.*ideas are not switched on for this account yet/s);
-    const keyless = await createNoteIdea(createSessionsCall({ env, key: null }), { env, account: () => 'default' })({ idea: 'kept with no sign-in' });
+    const keyless = await createNoteIdea(createSessionsCall({ env, key: null }), { env, account: () => 'default', fingerprint: FP })({ idea: 'kept with no sign-in' });
     assert.match(keyless.content[0].text, /NOT saved yet/);
     assert.equal(waiting().length, 3);
-    assert.deepEqual(await resendPending('default', call(), env), { sent: 0, refused: 0, still: 1 }, 'still unreachable: it stops at the first and tries again later');
+    assert.deepEqual(await resend(), { sent: 0, refused: 0, still: 1, other_sign_in: 0 }, 'still unreachable: it stops at the first and tries again later');
     assert.equal(waiting()[0].attempts, 1);
     const old = pendingSummary('default', env, Date.now() + 30 * 3600 * 1000);
-    assert.deepEqual([old.count, old.oldest_hours >= 24], [3, true]);
+    assert.deepEqual([old.count, old.oldest_hours >= 24, old.unreadable, old.other_sign_in], [3, true, 0, 0]);
   });
 
   it('a server that does not have the idea routes yet (a bare 404) is "could not ask": the idea stays pending, not refused', async () => {
@@ -183,24 +195,95 @@ describe('note_idea: pending, honestly', () => {
     assert.match(JSON.parse(readFileSync(join(dir, 'default', 'refused', kept[0]), 'utf8')).refused_because, /not hosted by this account/);
   });
 
-  it('a capture belongs to the account it was made for: each account has its own folder', async () => {
+  it('a capture is only ever sent with the sign-in it was made under, whatever the account is called on this machine', async () => {
+    mode = 'down';
+    await note({ idea: 'made under sign-in A' });
+    mode = 'up'; seen = [];
+    // The same folder, a different sign-in (the active profile was switched under a running connector).
+    assert.deepEqual(await resend('default', 'fp-of-another-key'), { sent: 0, refused: 0, still: 0, other_sign_in: 1 });
+    assert.equal(seen.length, 0, 'nothing was sent with the other sign-in');
+    const said = await createNoteIdea(call(), { env, account: () => 'default', fingerprint: 'fp-of-another-key' })({ idea: 'made under sign-in B' });
+    assert.match(said.content[0].text, /^✅.*1 idea\(s\) on this device were captured under a different sign-in and wait for it; they are not sent with this one\./s);
+    assert.ok(seen.every((x) => x.method === 'GET' || x.body.title === 'made under sign-in B'), 'only its own capture went out');
+    assert.deepEqual(waiting().map((c) => c.body.title), ['made under sign-in A']);
+    assert.deepEqual(await resend(), { sent: 1, refused: 0, still: 0, other_sign_in: 0 });
+    assert.equal(signInFingerprint('user-key'), signInFingerprint('user-key'));
+    assert.notEqual(signInFingerprint('user-key'), signInFingerprint('user-key2'));
+    assert.ok(!signInFingerprint('user-key').includes('user-key') && signInFingerprint(null) === null);
+  });
+
+  it('one account, one folder: two names never share one, and a name cannot climb out of the pending folder', async () => {
+    const names = ['a!b@example.com', 'a_b@example.com', 'a.b@example.com', 'A_B@example.com', '../../etc', '..', '.', 'a/b', 'a~21~b@example.com'];
+    const folders = names.map((n) => accountFolder(n));
     assert.equal(accountFolder('Adobe@ChrisOladapo.com'), 'adobe@chrisoladapo.com');
-    assert.doesNotMatch(accountFolder('../../etc'), /\//);
+    assert.equal(new Set(folders.filter((f, i) => names[i].toLowerCase() !== 'a_b@example.com' || i === 1)).size, names.length - 1, 'only the two spellings of one address share a folder');
+    for (const f of folders) { assert.doesNotMatch(f, /[\/\\]/); assert.ok(f !== '..' && f !== '.' && f.length > 0, f); }
     assert.equal(accountFolder(null), 'default');
     mode = 'down';
     await note({ idea: 'for the default account' });
     assert.deepEqual([listPending('default', env).length, listPending('work@example.com', env).length], [1, 0]);
     mode = 'up';
-    assert.deepEqual(await resendPending('work@example.com', call(), env), { sent: 0, refused: 0, still: 0 }, "another account's pass never sends it");
+    assert.deepEqual(await resend('work@example.com'), { sent: 0, refused: 0, still: 0, other_sign_in: 0 }, "another account's pass never sees it");
     assert.equal(listPending('default', env).length, 1);
+  });
+
+  it('a crash between the two steps of a write does not strand the capture; a file that cannot be read is counted, never hidden', async () => {
+    const folder = join(dir, 'default'); mkdirSync(folder, { recursive: true });
+    const capture = { client_id: 'idea-crashed-mid-write', id: '11111111-1111-4111-8111-111111111111', account: 'default', sign_in: FP, created_at: new Date(Date.now() - 3600e3).toISOString(), attempts: 0, body: { title: 'Written, never renamed', said_in: { surface: 'terminal_session' } } };
+    const orphan = join(folder, 'idea-crashed-mid-write.json.4242.a1b2c3d4e5f6.tmp');
+    writeFileSync(orphan, JSON.stringify(capture));
+    assert.deepEqual(readPending('default', env).captures, [], 'a write still in progress is left alone');
+    const old = new Date(Date.now() - 5 * 60e3); utimesSync(orphan, old, old);
+    assert.deepEqual(readPending('default', env).captures.map((c) => c.client_id), ['idea-crashed-mid-write']);
+    assert.ok(existsSync(join(folder, 'idea-crashed-mid-write.json')) && !existsSync(orphan));
+    writeFileSync(join(folder, 'idea-broken.json'), '{"client_id": "idea-broken", "body": {');
+    const s2 = pendingSummary('default', env, Date.now(), FP);
+    assert.deepEqual([s2.count, s2.unreadable], [1, 1]);
+    const r = await note({ idea: 'the next idea says so' });
+    assert.match(r.content[0].text, /^✅.*Also sent 1 idea\(s\).*1 file\(s\) in this device's pending folder could not be read; they are kept there and need a look\./s);
+    assert.ok(existsSync(join(folder, 'idea-broken.json')), 'kept');
+  });
+
+  it('once the idea is saved the reply says saved, whatever then goes wrong with the waiting ones', async () => {
+    const folder = join(dir, 'default'); mkdirSync(join(folder, 'idea-a-folder-not-a-file.json'), { recursive: true });
+    const r = await note({ idea: 'Saved despite a broken queue' });
+    assert.equal(r.isError, undefined);
+    assert.match(r.content[0].text, /^✅ Idea saved to purmemo: "Saved despite a broken queue"/);
+    assert.equal([...ideas.values()].filter((i) => i.title === 'Saved despite a broken queue').length, 1);
+  });
+
+  it('two writers on one capture never share a half-written file: every write lands whole', async () => {
+    const capture = { client_id: 'idea-contended', id: '22222222-2222-4222-8222-222222222222', account: 'default', sign_in: FP, created_at: new Date().toISOString(), attempts: 0, body: { title: 'x'.repeat(2000), said_in: { surface: 'terminal_session' } } };
+    await Promise.all(Array.from({ length: 40 }, (_, i) => new Promise((resolve) => setImmediate(() => { writePending('default', { ...capture, attempts: i, last_error: 'y'.repeat(i * 50) }, env); resolve(); }))));
+    const got = readPending('default', env);
+    assert.deepEqual([got.captures.length, got.unreadable, readdirSync(join(dir, 'default')).filter((f) => f.endsWith('.tmp'))], [1, [], []]);
   });
 });
 
 describe('note_idea: at connector start', () => {
-  it('nothing waiting = no timer and no call; something waiting is sent a moment after start; never in remote mode', async () => {
-    assert.equal(sendWaitingIdeasAtStart(1, env, call()), null);
+  it('nothing waiting = no timer and no call', async () => {
+    assert.equal(sendWaitingIdeasAtStart(1, env, call(), { account: () => 'default', fingerprint: FP }), null);
     assert.equal(seen.length, 0);
-    assert.equal(sendWaitingIdeasAtStart(1, { ...env, PURMEMO_IDEAS_OFF: '1' }, call()), null);
+  });
+  it('something waiting is sent a moment after start, with the sign-in the process started on and no other', async () => {
+    mode = 'down';
+    await note({ idea: 'waited through a restart' });
+    await createNoteIdea(call(), { env, account: () => 'default', fingerprint: 'fp-of-another-key' })({ idea: 'made under another sign-in' });
+    mode = 'up'; seen = [];
+    const t = sendWaitingIdeasAtStart(5, env, call(), { account: () => 'default', fingerprint: FP });
+    assert.ok(t, 'a timer was set');
+    await new Promise((r) => setTimeout(r, 120));
+    assert.deepEqual([...ideas.values()].map((i) => i.title), ['waited through a restart']);
+    assert.deepEqual(waiting().map((c) => c.body.title), ['made under another sign-in']);
+  });
+  it('never when switched off, never in hosted mode, never without a sign-in', async () => {
+    mode = 'down'; await note({ idea: 'waiting' }); mode = 'up'; seen = [];
+    const deps = { account: () => 'default', fingerprint: FP };
+    assert.equal(sendWaitingIdeasAtStart(1, { ...env, PURMEMO_IDEAS_OFF: '1' }, call(), deps), null);
+    assert.equal(sendWaitingIdeasAtStart(1, { ...env, PURMEMO_REMOTE: '1' }, call(), deps), null);
+    assert.equal(sendWaitingIdeasAtStart(1, env, call(), { account: () => 'default', fingerprint: null }), null);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(seen.length, 0);
   });
 });
 
@@ -211,6 +294,7 @@ describe('note_idea: who sees it', () => {
     assert.equal(isToolVisible('note_idea', {}, ['deep', 'sessions_search']), false);
     assert.equal(isToolVisible('note_idea', {}, null), false);
     assert.equal(isToolVisible('note_idea', { PURMEMO_IDEAS_OFF: '1' }, ['projects']), false);
+    assert.equal(isToolVisible('note_idea', { PURMEMO_REMOTE: '1' }, ['projects']), false, 'the hosted connector does not offer it yet');
     assert.ok(ACCOUNT_TOOLS.includes('note_idea'));
   });
   it('an idea is never lost to a lookup that did not answer: features unknown lets the capture run; known and missing refuses', () => {

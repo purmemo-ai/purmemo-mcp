@@ -12,7 +12,7 @@
  * hides the tool for everyone; on never grants anything.
  *   what_changed          feature 'notebook'         (no switch)
  *   search_past_sessions  feature 'sessions_search'  switch PURMEMO_SESSIONS_BETA=1
- *   note_idea             feature 'projects'         on unless PURMEMO_IDEAS_OFF=1
+ *   note_idea             feature 'projects'         local connector only; off with PURMEMO_IDEAS_OFF=1
  * Features unknown (the lookup failed or has not answered) = gated tools stay
  * hidden; the core never depends on the lookup.
  *
@@ -28,7 +28,8 @@ export const GATED_TOOLS: Record<string, { feature: string; switchOn: (env: Node
   what_changed: { feature: 'notebook', switchOn: () => true },
   search_past_sessions: { feature: 'sessions_search', switchOn: (env) => env.PURMEMO_SESSIONS_BETA === '1' },
   // Idea records (purmemo-next migration 046). Listed for an account holding 'projects'; PURMEMO_IDEAS_OFF=1 hides it for the process.
-  note_idea: { feature: 'projects', switchOn: (env) => env.PURMEMO_IDEAS_OFF !== '1' },
+  // Local connector only for now: the hosted connector dispatches tools on another path and has no device to keep a pending file on.
+  note_idea: { feature: 'projects', switchOn: (env) => env.PURMEMO_IDEAS_OFF !== '1' && env.PURMEMO_REMOTE !== '1' && !process.argv.includes('--remote') },
 };
 /** Gated tools that capture something the user said: run even when the account's features could not be confirmed. */
 export const CAPTURE_TOOLS = ['note_idea'];
