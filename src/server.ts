@@ -69,7 +69,7 @@ import {
   runWithApiKey
 } from './lib/api-client.js';
 import { withAccountTools, callOnAccount, transferToolDefinition, handleTransferMemory, TRANSFER_TOOL_NAME } from './tools/accounts.js';
-import { multiAccountEnabled } from './auth/accounts.js';
+import { multiAccountEnabled, defaultAccount } from './auth/accounts.js';
 import {
   initHandlers,
   handleSaveConversation,
@@ -103,7 +103,7 @@ import {
 } from './tools/handlers.js';
 import { handleGenerateHandoffBrief } from './tools/handoff.js';
 import { handleSearchPastSessions } from './tools/sessions.js';
-import { handleNoteIdea, IDEA_SURFACES, sendWaitingIdeasAtStart } from './tools/ideas.js';
+import { handleNoteIdea, IDEA_SURFACES, sendWaitingIdeasAtStart, signInLoadedFor } from './tools/ideas.js';
 import { visibleTools, listableTools, gatedToolResult, hiddenToolResult, toolFlags, GATED_TOOLS } from './lib/tool-visibility.js';
 import { createFeaturesCache } from './lib/features.js';
 import { checkToolInput } from './lib/tool-input.js';
@@ -2301,9 +2301,13 @@ async function resolveApiKey() {
   // ProfileResolver picks the active file: PURMEMO_PROFILE → active pointer →
   // legacy auth.json.
   try {
+    // The account name and the sign-in are read in one step, with nothing awaited between them: note_idea labels
+    // a capture with this name and sends it with this sign-in.
+    let signedInAs: string | null = null; try { signedInAs = defaultAccount(); } catch { signedInAs = null; }
     const tokenStore = new TokenStore();
     const token = await tokenStore.getToken();
     if (token?.access_token) {
+      signInLoadedFor(signedInAs);
       structuredLog.info('API key resolved from active profile');
 
       // Loud warning if the user *also* has PURMEMO_API_KEY in their env. We

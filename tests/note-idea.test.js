@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync, readdirSync, existsSync, readFileSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSessionsCall } from '../dist/lib/api-client.js';
-import { createNoteIdea, resendPending, sendWaitingIdeasAtStart, accountForCapture, IDEA_SURFACES } from '../dist/tools/ideas.js';
+import { createNoteIdea, resendPending, sendWaitingIdeasAtStart, accountForCapture, signInLoadedFor, startedAs, IDEA_SURFACES } from '../dist/tools/ideas.js';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { listPending, readPending, writePending, pendingSummary, accountFolder, signInFingerprint } from '../dist/lib/pending-ideas.js';
@@ -324,6 +324,20 @@ describe('note_idea: third review round', () => {
     assert.equal(r.isError, true);
     assert.match(r.content[0].text, /NOT saved.*Restart the connector/s);
     assert.deepEqual([seen.length, existsSync(join(dir, accountFolder('b@example.com'))), existsSync(join(dir, accountFolder('a@example.com')))], [0, false, false]);
+  });
+
+  it('the account name is the one recorded by the step that loaded the sign-in, never one read at another moment; before that, "the default account" is refused', async () => {
+    assert.deepEqual(startedAs(), { account: null, loaded: false }, 'nothing is assumed when the module is merely loaded');
+    const before = await createNoteIdea(call(), { env, fingerprint: FP, scope: { email: 'a@example.com', isDefault: true } })({ idea: 'before the sign-in is loaded' });
+    assert.match(before.content[0].text, /NOT saved/);
+    signInLoadedFor('B@example.com'); // the sign-in that was loaded is B's, whatever the default was called a moment earlier or later
+    assert.deepEqual(startedAs(), { account: 'b@example.com', loaded: true });
+    const forA = await createNoteIdea(call(), { env, fingerprint: FP, scope: { email: 'a@example.com', isDefault: true } })({ idea: 'for A, on B\'s sign-in' });
+    assert.match(forA.content[0].text, /NOT saved.*Restart the connector/s);
+    assert.equal(seen.length, 0);
+    const forB = await createNoteIdea(call(), { env, fingerprint: FP, scope: { email: 'b@example.com', isDefault: true } })({ idea: 'for B, on B\'s sign-in' });
+    assert.match(forB.content[0].text, /^✅/);
+    assert.ok(existsSync(join(dir, accountFolder('b@example.com'))) && !existsSync(join(dir, accountFolder('a@example.com'))));
   });
 
   it('a capture goes out only under the very sign-in it was made with: the key on the wire is checked, not only the label', async () => {

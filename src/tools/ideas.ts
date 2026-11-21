@@ -20,9 +20,13 @@ import { writePending, readPending, removePending, refusePending, pendingSummary
 export const IDEA_SURFACES = ['terminal_session', 'bauhaus_conversation', 'cosmo', 'app_voice_note', 'share_sheet', 'other'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const str = (v, max) => { const s = typeof v === 'string' ? sanitizeUnicode(v).trim() : ''; return s ? s.slice(0, max) : null; };
-// The account this process signed in as when it started. The default sign-in is read once, then; the name of the
-// active account on this machine can be switched under a running connector, and the sign-in in use does not follow.
-let STARTED_AS: string | null = null; try { STARTED_AS = defaultAccount(); } catch { STARTED_AS = null; }
+// The account whose sign-in this process loaded. The name of the active account on this machine can be switched
+// under a running connector, and the sign-in in use does not follow. Recorded by the very step that loads the
+// sign-in (server.ts resolveApiKey → signInLoadedFor), so the two can never describe different moments. Until
+// that has happened no account is known, and a call that names "the default account" is refused.
+let STARTED_AS: string | null = null; let SIGN_IN_LOADED = false;
+export function signInLoadedFor(account: string | null) { STARTED_AS = account ? String(account).toLowerCase() : null; SIGN_IN_LOADED = true; }
+export const startedAs = () => ({ account: STARTED_AS, loaded: SIGN_IN_LOADED });
 
 /**
  * The account a capture is made for, which must be the account whose sign-in sends it. → { account } or
@@ -123,6 +127,7 @@ export function createNoteIdea(call = makeSessionsCall, deps: any = {}) {
     // The account this call runs on: the one named by `account`, else this machine's default sign-in.
     const scope = deps.scope !== undefined ? deps.scope : currentAccountScope();
     const forWhom = deps.account ? { account: deps.account() } : accountForCapture(scope, deps.startedAs !== undefined ? deps.startedAs : STARTED_AS);
+    if (!deps.account && deps.startedAs === undefined && !SIGN_IN_LOADED && !isRemoteMode(env) && scope?.isDefault) forWhom.mismatch = true;
     if (forWhom.mismatch) return text('❌ The idea is NOT saved. This connector started signed in as a different account than the one named, and the default account on this machine has been switched since. Restart the connector, then say it again.', true);
     const account = forWhom.account;
     // Noted into ANOTHER signed-in account (a bauhaus idea said at home goes to the work account): this session
@@ -197,7 +202,7 @@ export const handleNoteIdea = createNoteIdea();
  */
 export function sendWaitingIdeasAtStart(delayMs = 5000, env = process.env, call = makeSessionsCall, deps: any = {}) {
   if (env.PURMEMO_IDEAS_OFF === '1' || isRemoteMode(env)) return null;
-  const account = deps.account ? deps.account() : ((defaultAccount(env) || 'default').toLowerCase());
+  const account = deps.account ? deps.account() : (STARTED_AS || 'default');
   // The sign-in this process started with. Captures made under any other are left alone.
   const fingerprint = deps.fingerprint !== undefined ? deps.fingerprint : signInFingerprint(getEffectiveApiKey());
   let waiting; try { waiting = readPending(account, env); } catch { return null; }
