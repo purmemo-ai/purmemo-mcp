@@ -11,7 +11,9 @@ import { mkdtempSync, rmSync, readdirSync, existsSync, readFileSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSessionsCall } from '../dist/lib/api-client.js';
-import { createNoteIdea, resendPending, sendWaitingIdeasAtStart, IDEA_SURFACES } from '../dist/tools/ideas.js';
+import { createNoteIdea, resendPending, sendWaitingIdeasAtStart, accountForCapture, IDEA_SURFACES } from '../dist/tools/ideas.js';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { listPending, readPending, writePending, pendingSummary, accountFolder, signInFingerprint } from '../dist/lib/pending-ideas.js';
 import { GATED_TOOLS, gatedToolResult, isToolVisible, CAPTURE_TOOLS } from '../dist/lib/tool-visibility.js';
 import { ACCOUNT_TOOLS } from '../dist/tools/accounts.js';
@@ -303,5 +305,103 @@ describe('note_idea: who sees it', () => {
     assert.match(gatedToolResult('note_idea', {}, ['deep']).content[0].text, /not part of your plan/);
     assert.match(gatedToolResult('note_idea', { PURMEMO_IDEAS_OFF: '1' }, ['projects']).content[0].text, /not available here/);
     assert.match(gatedToolResult('search_past_sessions', { PURMEMO_SESSIONS_BETA: '1' }, null).content[0].text, /Could not confirm/, 'other gated tools still fail closed');
+  });
+});
+
+describe('note_idea: third review round', () => {
+  const held = (extra = {}) => ({ client_id: 'idea-by-hand-0001', id: '33333333-3333-4333-8333-333333333333', account: 'default', sign_in: FP, created_at: new Date(Date.now() - 3600e3).toISOString(), attempts: 0, body: { title: 'Put there by hand', said_in: { surface: 'terminal_session' } }, ...extra });
+  const put = (name, capture) => { const folder = join(dir, 'default'); mkdirSync(folder, { recursive: true }); writeFileSync(join(folder, `${name}.json`), JSON.stringify(capture)); };
+
+  it('the account a capture is for is the account whose sign-in sends it: a default switched under a running connector is refused, and nothing is written or sent', async () => {
+    assert.deepEqual(accountForCapture(null, 'a@example.com'), { account: 'a@example.com' });
+    assert.deepEqual(accountForCapture(null, null), { account: 'default' });
+    assert.deepEqual(accountForCapture({ email: 'B@example.com', isDefault: false }, 'a@example.com'), { account: 'b@example.com' });
+    assert.deepEqual(accountForCapture({ email: 'A@example.com', isDefault: true }, 'a@example.com'), { account: 'a@example.com' });
+    assert.deepEqual(accountForCapture({ email: 'b@example.com', isDefault: true }, 'a@example.com'), { mismatch: true });
+    assert.deepEqual(accountForCapture({ email: 'b@example.com', isDefault: true }, null), { mismatch: true });
+    // Started as A; the machine's default was switched to B; the call names B "the default". The sign-in in use is still A's.
+    const r = await createNoteIdea(call(), { env, fingerprint: FP, startedAs: 'a@example.com', scope: { email: 'b@example.com', isDefault: true } })({ idea: 'would have gone to the wrong account' });
+    assert.equal(r.isError, true);
+    assert.match(r.content[0].text, /NOT saved.*Restart the connector/s);
+    assert.deepEqual([seen.length, existsSync(join(dir, accountFolder('b@example.com'))), existsSync(join(dir, accountFolder('a@example.com')))], [0, false, false]);
+  });
+
+  it('a capture goes out only under the very sign-in it was made with: the key on the wire is checked, not only the label', async () => {
+    const fpA = signInFingerprint('key-of-a'); const fpB = signInFingerprint('key-of-b');
+    const asA = createSessionsCall({ env, key: 'key-of-a' }); const asB = createSessionsCall({ env, key: 'key-of-b' });
+    mode = 'down';
+    await createNoteIdea(asA, { env, account: () => 'default', fingerprint: fpA })({ idea: 'made by A' });
+    mode = 'up'; seen = [];
+    assert.deepEqual(await resendPending('default', asB, env, null, fpB), { sent: 0, refused: 0, still: 0, other_sign_in: 1 });
+    await createNoteIdea(asB, { env, account: () => 'default', fingerprint: fpB })({ idea: 'made by B' });
+    assert.deepEqual(await resendPending('default', asA, env, null, fpA), { sent: 1, refused: 0, still: 0, other_sign_in: 0 });
+    const posts = seen.filter((x) => x.method === 'POST').map((x) => [x.body.title, x.auth]);
+    assert.deepEqual(posts, [['made by B', 'Bearer key-of-b'], ['made by A', 'Bearer key-of-a']]);
+  });
+
+  it('a file that does not say which sign-in or which account it was made under is never sent; it stays and is counted', async () => {
+    const { sign_in: _none, ...unsigned } = held();
+    put('idea-by-hand-0001', unsigned);
+    put('idea-by-hand-0002', held({ client_id: 'idea-by-hand-0002', account: 'someone-else@example.com' }));
+    assert.deepEqual(await resend(), { sent: 0, refused: 0, still: 0, other_sign_in: 2 });
+    assert.deepEqual([seen.length, waiting().length], [0, 2]);
+  });
+
+  it('a session of another account is never named to this one, whatever the file on the device holds', async () => {
+    put('idea-by-hand-0001', held({ body: { title: 'Said at home, for work', said_in: { surface: 'terminal_session', account: 'home@example.com', session: 'session-account:home@example.com', machine: 'private-mac', memory: 'mem-1' } } }));
+    assert.equal((await resend()).sent, 1);
+    const sent = seen.find((x) => x.method === 'POST');
+    assert.deepEqual(sent.body.said_in, { surface: 'terminal_session', account: 'another-account' });
+    assert.ok(!/home@example|private-mac|session-account|mem-1/.test(JSON.stringify(sent.body)));
+  });
+
+  it('written to the device first, always: when that fails the idea is not sent, and the reply says so', async () => {
+    writeFileSync(join(dir, 'not-a-folder'), 'x');
+    const broken = { ...env, PURMEMO_PENDING_DIR: join(dir, 'not-a-folder') };
+    const r = await createNoteIdea(createSessionsCall({ env: broken, key: 'user-key' }), { env: broken, account: () => 'default', fingerprint: FP })({ idea: 'nowhere to keep it' });
+    assert.equal(r.isError, true);
+    assert.match(r.content[0].text, /NOT saved: it could not be written to this device first, so it was not sent/);
+    assert.doesNotMatch(r.content[0].text, /kept on this device/);
+    assert.deepEqual([seen.length, ideas.size], [0, 0], 'nothing went out, so saying it again cannot make a second idea');
+  });
+
+  it('refused, and it cannot be set aside: the reply says where the words really are', async () => {
+    const folder = join(dir, 'default'); mkdirSync(folder, { recursive: true }); writeFileSync(join(folder, 'refused'), 'in the way');
+    mode = 'refuse';
+    const r = await note({ idea: 'refused with nowhere to put it' });
+    assert.match(r.content[0].text, /NOT saved\. It is still on this device, among the waiting ideas/);
+    assert.deepEqual(waiting().map((c) => c.body.title), ['refused with nowhere to put it'], 'and that is true');
+  });
+
+  it('offline, a file that cannot be read is still named', async () => {
+    const folder = join(dir, 'default'); mkdirSync(folder, { recursive: true }); writeFileSync(join(folder, 'idea-broken.json'), '{"client_id": "idea-bro');
+    mode = 'down';
+    const r = await note({ idea: 'noted while offline' });
+    assert.match(r.content[0].text, /^⏳ NOT saved yet.*Waiting on this device: 1\. 1 file\(s\) in this device's pending folder could not be read; they are kept there and need a look\./s);
+  });
+
+  it('started right after a crash, with only a half-written capture: it looks again once that can be put back, and sends it', async () => {
+    const folder = join(dir, 'default'); mkdirSync(folder, { recursive: true });
+    const orphan = join(folder, 'idea-by-hand-0001.json.4242.a1b2c3d4e5f6.tmp');
+    writeFileSync(orphan, JSON.stringify(held()));
+    assert.deepEqual(readPending('default', env).captures, []);
+    const t = sendWaitingIdeasAtStart(5, env, call(), { account: () => 'default', fingerprint: FP, orphanMs: 20 });
+    assert.ok(t, 'a timer was set although nothing could be sent yet');
+    const old = new Date(Date.now() - 5 * 60e3); utimesSync(orphan, old, old); // a minute passes
+    await new Promise((r) => setTimeout(r, 1300));
+    assert.deepEqual([[...ideas.values()].map((i) => i.title), waiting().length, existsSync(orphan)], [['Put there by hand'], 0, false]);
+  });
+
+  it('two connector processes writing one capture at the same moment: every read finds it whole, and no half-written file is left', async () => {
+    const lib = fileURLToPath(new URL('../dist/lib/pending-ideas.js', import.meta.url));
+    const script = `import { writePending } from ${JSON.stringify(lib)}; const env = { PURMEMO_PENDING_DIR: ${JSON.stringify(dir)} }; const w = process.argv[1];
+      for (let i = 0; i < 300; i += 1) writePending('default', { client_id: 'idea-two-processes', id: '44444444-4444-4444-8444-444444444444', account: 'default', sign_in: 'fp', created_at: '2026-11-21T00:00:00.000Z', attempts: i, last_error: w.repeat(i * 20), body: { title: 'x'.repeat(4000), said_in: { surface: 'terminal_session' } } }, env);`;
+    const run = (w) => new Promise((resolve, reject) => { const c = spawn(process.execPath, ['--input-type=module', '-e', script, w], { stdio: 'ignore' }); c.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`writer ${w} exited ${code}`)))); });
+    let reads = 0; let stop = false;
+    const reader = (async () => { while (!stop) { const got = readPending('default', env); assert.deepEqual(got.unreadable, []); assert.ok(got.captures.length <= 1); reads += 1; await new Promise((r) => setImmediate(r)); } })();
+    await Promise.all([run('a'), run('b')]); stop = true; await reader;
+    const got = readPending('default', env);
+    assert.ok(reads > 0);
+    assert.deepEqual([got.captures.length, got.unreadable, readdirSync(join(dir, 'default')).filter((f) => f.endsWith('.tmp'))], [1, [], []]);
   });
 });

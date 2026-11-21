@@ -15,11 +15,26 @@ import { hostname } from 'node:os';
 import { structuredLog } from '../lib/logger.js';
 import { makeSessionsCall, sanitizeUnicode, safeErrorMessage, getEffectiveApiKey } from '../lib/api-client.js';
 import { currentAccountScope, defaultAccount, isRemoteMode } from '../auth/accounts.js';
-import { writePending, readPending, removePending, refusePending, pendingSummary, signInFingerprint, PENDING_RESEND_MAX } from '../lib/pending-ideas.js';
+import { writePending, readPending, removePending, refusePending, pendingSummary, signInFingerprint, accountFolder, halfWrittenWaiting, PENDING_RESEND_MAX, TMP_ORPHAN_MS } from '../lib/pending-ideas.js';
 
 export const IDEA_SURFACES = ['terminal_session', 'bauhaus_conversation', 'cosmo', 'app_voice_note', 'share_sheet', 'other'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const str = (v, max) => { const s = typeof v === 'string' ? sanitizeUnicode(v).trim() : ''; return s ? s.slice(0, max) : null; };
+// The account this process signed in as when it started. The default sign-in is read once, then; the name of the
+// active account on this machine can be switched under a running connector, and the sign-in in use does not follow.
+let STARTED_AS: string | null = null; try { STARTED_AS = defaultAccount(); } catch { STARTED_AS = null; }
+
+/**
+ * The account a capture is made for, which must be the account whose sign-in sends it. → { account } or
+ * { mismatch: true } when the call names "the default account" but that name has changed since this connector
+ * started: the sign-in in use is still the earlier account's, so the idea would go to the wrong one.
+ */
+export function accountForCapture(scope, startedAs: string | null) {
+  const started = (startedAs || '').toLowerCase();
+  if (scope && !scope.isDefault) return { account: String(scope.email).toLowerCase() };
+  if (scope && scope.isDefault && String(scope.email).toLowerCase() !== started) return { mismatch: true };
+  return { account: started || 'default' };
+}
 const text = (t, isError = false) => ({ content: [{ type: 'text', text: t }], ...(isError ? { isError: true } : {}) });
 
 /** The error code purmemo-next sent, from the tagged error's message ("API Error 409: {...}"). */
@@ -39,6 +54,8 @@ const isRefusal = (err) => [400, 409, 413, 422].includes(err?.status) || (err?.s
 export async function sendCapture(capture, call = makeSessionsCall) {
   try {
     const body = { ...capture.body, client_id: capture.client_id, id: capture.id };
+    // A session of another account is never named to this one, whatever the file on the device holds.
+    if (body.said_in && body.said_in.account) body.said_in = { surface: body.said_in.surface, account: 'another-account' };
     let filed = 'unfiled';
     if (capture.project_id || capture.repository) {
       const qs = new URLSearchParams();
@@ -73,7 +90,9 @@ export async function resendPending(account, call = makeSessionsCall, env = proc
     let tried = 0;
     for (const capture of readPending(account, env).captures) {
       if (capture.client_id === except) continue;
-      if (capture.sign_in && capture.sign_in !== fp) { out.other_sign_in += 1; continue; }
+      // Only with the sign-in it was made under, and only for the account whose folder it is in. A capture that
+      // does not say (none was ever written that way by a released connector) is left where it is.
+      if (!fp || capture.sign_in !== fp || accountFolder(capture.account) !== accountFolder(account)) { out.other_sign_in += 1; continue; }
       if (tried >= PENDING_RESEND_MAX) break;
       tried += 1;
       const r = await sendCapture(capture, call);
@@ -102,8 +121,10 @@ export function createNoteIdea(call = makeSessionsCall, deps: any = {}) {
     const session = str(args?.session_id, 300);
     // "His exact words" is a claim: it needs the words and the session they are in. Otherwise it is a note of what he said.
     // The account this call runs on: the one named by `account`, else this machine's default sign-in.
-    const scope = currentAccountScope();
-    const account = deps.account ? deps.account() : (scope?.email || defaultAccount(env) || 'default');
+    const scope = deps.scope !== undefined ? deps.scope : currentAccountScope();
+    const forWhom = deps.account ? { account: deps.account() } : accountForCapture(scope, deps.startedAs !== undefined ? deps.startedAs : STARTED_AS);
+    if (forWhom.mismatch) return text('❌ The idea is NOT saved. This connector started signed in as a different account than the one named, and the default account on this machine has been switched since. Restart the connector, then say it again.', true);
+    const account = forWhom.account;
     // Noted into ANOTHER signed-in account (a bauhaus idea said at home goes to the work account): this session
     // is kept under this machine's default account, not the one the idea goes to. purmemo is told so, and then
     // keeps only the kind of surface and the date there: never the machine or the session.
@@ -124,8 +145,14 @@ export function createNoteIdea(call = makeSessionsCall, deps: any = {}) {
       },
     };
     // The hosted connector has no device to keep a file on: there the idea is saved or it is not, and it says which.
-    let held = remote;
-    if (!remote) { try { writePending(account, capture, env); held = true; } catch (err) { structuredLog.warn('note_idea: could not write the pending file', { error: safeErrorMessage(err) }); } }
+    // On a device the capture is written first, ALWAYS: sent without that, an answer lost on the way back would
+    // leave nothing to send again under the same id, and saying it again would make a second idea.
+    if (!remote) {
+      try { writePending(account, capture, env); } catch (err) {
+        structuredLog.warn('note_idea: could not write the pending file', { error: safeErrorMessage(err) });
+        return text('❌ The idea is NOT saved: it could not be written to this device first, so it was not sent. Check the purmemo pending folder on this device can be written, then say it again.', true);
+      }
+    }
     const r = await sendCapture(capture, call);
     const noteExact = args?.exact_words === true && !exact ? ` Kept as a note of what was said, not as exact words: ${elsewhere ? 'this session belongs to another account than the idea, so it is not named there' : 'exact words need the words and the session_id they are in'}.` : '';
     if (r.state === 'saved') {
@@ -148,15 +175,16 @@ export function createNoteIdea(call = makeSessionsCall, deps: any = {}) {
       return text(`✅ Idea saved to purmemo: "${title}"${r.idea?.name ? ` (${r.idea.name})` : ''}, ${where}.${noteExact}${flushed.sent ? ` Also sent ${flushed.sent} idea(s) that had been waiting on this device.` : ''}${flushed.refused ? ` ${flushed.refused} waiting idea(s) were refused and are kept on this device under refused/.` : ''}${waitingNote}`);
     }
     if (r.state === 'refused') {
-      if (!remote) { try { refusePending(account, capture, r.reason, env); } catch { /* it stays pending: still on the device */ } }
+      let kept = remote ? '' : ' It is kept on this device (refused) so the words are not lost.';
+      // If it cannot be set aside it is still where it was written first: on the device, waiting.
+      if (!remote) { try { refusePending(account, capture, r.reason, env); } catch { kept = ' It is still on this device, among the waiting ideas, so the words are not lost.'; } }
       structuredLog.warn('note_idea: refused', { code: r.code });
-      return text(`❌ purmemo did not take this idea: ${r.reason}. It is NOT saved.${remote ? '' : ' It is kept on this device (refused) so the words are not lost.'}`, true);
+      return text(`❌ purmemo did not take this idea: ${r.reason}. It is NOT saved.${kept}`, true);
     }
     structuredLog.warn('note_idea: pending', { status: r.status });
-    if (!remote && !held) return text(`⚠️ The idea is NOT saved: purmemo did not answer (${r.why}), and it could not be kept on this device either. Say it again.`, true);
     if (remote) return text(`⚠️ The idea is NOT saved: purmemo did not answer (${r.why}). Say it again in a minute.`, true);
     const s = pendingSummary(account, env, now().getTime(), fingerprint);
-    return text(`⏳ NOT saved yet: purmemo did not answer (${r.why}). The idea is waiting on this device as pending and will be sent again the next time an idea is noted and when the connector starts. Waiting on this device: ${s.count}${s.oldest_hours >= 24 ? `, the oldest for ${Math.round(s.oldest_hours)} hours` : ''}.${noteExact}`);
+    return text(`⏳ NOT saved yet: purmemo did not answer (${r.why}). The idea is waiting on this device as pending and will be sent again the next time an idea is noted and when the connector starts. Waiting on this device: ${s.count}${s.oldest_hours >= 24 ? `, the oldest for ${Math.round(s.oldest_hours)} hours` : ''}.${s.unreadable ? ` ${s.unreadable} file(s) in this device's pending folder could not be read; they are kept there and need a look.` : ''}${noteExact}`);
   };
 }
 
@@ -169,12 +197,17 @@ export const handleNoteIdea = createNoteIdea();
  */
 export function sendWaitingIdeasAtStart(delayMs = 5000, env = process.env, call = makeSessionsCall, deps: any = {}) {
   if (env.PURMEMO_IDEAS_OFF === '1' || isRemoteMode(env)) return null;
-  const account = deps.account ? deps.account() : (defaultAccount(env) || 'default');
+  const account = deps.account ? deps.account() : ((defaultAccount(env) || 'default').toLowerCase());
   // The sign-in this process started with. Captures made under any other are left alone.
   const fingerprint = deps.fingerprint !== undefined ? deps.fingerprint : signInFingerprint(getEffectiveApiKey());
   let waiting; try { waiting = readPending(account, env); } catch { return null; }
   if (waiting.unreadable.length) structuredLog.warn('note_idea: files in the pending folder could not be read', { count: waiting.unreadable.length });
-  if (!waiting.captures.length || !fingerprint) return null;
+  if (!fingerprint) return null;
+  // A capture whose write a crash cut short is put back once it is a minute old. If that is all there is, look
+  // again then: otherwise it would wait for the next idea or the next start.
+  const halfWritten = !waiting.captures.length && halfWrittenWaiting(account, env);
+  if (!waiting.captures.length && !halfWritten) return null;
+  if (halfWritten) delayMs = Math.max(delayMs, (deps.orphanMs !== undefined ? deps.orphanMs : TMP_ORPHAN_MS) + 1000);
   const t = setTimeout(() => {
     resendPending(account, call, env, null, fingerprint)
       .then((r) => structuredLog.info('note_idea: sent waiting ideas at start', r))

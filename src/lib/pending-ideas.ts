@@ -19,7 +19,7 @@ import { homedir } from 'node:os';
 import { createHash, randomBytes } from 'node:crypto';
 
 export const PENDING_RESEND_MAX = 25; // per pass: a long outage is caught up over a few passes, never in one burst
-const TMP_ORPHAN_MS = 60 * 1000;      // a half-finished write older than this was left by a crash
+export const TMP_ORPHAN_MS = 60 * 1000;      // a half-finished write older than this was left by a crash
 
 export function pendingRoot(env: NodeJS.ProcessEnv = process.env): string {
   return (env.PURMEMO_PENDING_DIR || '').trim() || join(homedir(), '.purmemo', 'pending');
@@ -89,14 +89,18 @@ export function readPending(account, env: NodeJS.ProcessEnv = process.env, now =
   try { names = readdirSync(dir); } catch { return { captures, unreadable: ['(the folder itself)'] }; }
   for (const f of names) {
     if (f === 'refused') continue;
-    if (!f.endsWith('.json')) { if (f.endsWith('.tmp')) { try { if (now - statSync(join(dir, f)).mtimeMs >= TMP_ORPHAN_MS) unreadable.push(f); } catch { unreadable.push(f); } } continue; }
+    if (!f.endsWith('.json')) { if (f.endsWith('.tmp')) { try { if (now - statSync(join(dir, f)).mtimeMs >= TMP_ORPHAN_MS) unreadable.push(f); } catch { if (existsSync(join(dir, f))) unreadable.push(f); } } continue; }
     try {
       const c = JSON.parse(readFileSync(join(dir, f), 'utf8'));
       if (c && c.client_id && c.body) captures.push(c); else unreadable.push(f);
-    } catch { unreadable.push(f); }
+    } catch { if (existsSync(join(dir, f))) unreadable.push(f); } // gone since the folder was listed (sent, or finished by another writer): not a file that cannot be read
   }
   captures.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   return { captures, unreadable };
+}
+/** Is there a write a crash may have cut short, too young to be put back yet? */
+export function halfWrittenWaiting(account, env: NodeJS.ProcessEnv = process.env): boolean {
+  try { return readdirSync(dirOf(account, env)).some((f) => /\.json\.\d+\.[0-9a-f]+\.tmp$/.test(f)); } catch { return false; }
 }
 /** The captures waiting for an account, oldest first. */
 export function listPending(account, env: NodeJS.ProcessEnv = process.env): any[] {
