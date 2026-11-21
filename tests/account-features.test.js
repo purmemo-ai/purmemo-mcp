@@ -32,7 +32,7 @@ const CORE = [...CORE_TOOLS].sort();
 describe('the rules (pure)', () => {
   it('the core is four tools and needs no features; gated tools need their feature', () => {
     assert.deepEqual(CORE, ['get_memory_details', 'get_user_context', 'recall_memories', 'save_conversation']);
-    assert.deepEqual(Object.keys(GATED_TOOLS).sort(), ['search_past_sessions', 'what_changed']);
+    assert.deepEqual(Object.keys(GATED_TOOLS).sort(), ['note_idea', 'search_past_sessions', 'what_changed']);
     for (const t of CORE_TOOLS) for (const f of [null, [], FREE, CHRIS]) assert.equal(isToolVisible(t, {}, f), true);
     assert.equal(isToolVisible('what_changed', {}, CHRIS), true);
     assert.equal(isToolVisible('what_changed', {}, ['notebook']), true, 'the plan view alone is enough');

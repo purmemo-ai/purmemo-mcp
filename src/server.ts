@@ -103,6 +103,7 @@ import {
 } from './tools/handlers.js';
 import { handleGenerateHandoffBrief } from './tools/handoff.js';
 import { handleSearchPastSessions } from './tools/sessions.js';
+import { handleNoteIdea, IDEA_SURFACES, sendWaitingIdeasAtStart } from './tools/ideas.js';
 import { visibleTools, listableTools, gatedToolResult, hiddenToolResult, toolFlags, GATED_TOOLS } from './lib/tool-visibility.js';
 import { createFeaturesCache } from './lib/features.js';
 import { checkToolInput } from './lib/tool-input.js';
@@ -987,6 +988,31 @@ EXAMPLE USAGE:
         limit: { type: 'integer', default: 6, maximum: 12, description: 'Maximum number of session windows to return (default 6, max 12).' }
       },
       required: ['query']
+    }
+  },
+  {
+    name: 'note_idea',
+    annotations: {
+      title: 'Note an Idea',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true
+    },
+    description: `Notes an idea the user just said, as an idea record in purmemo (not as a memory). Use it the moment the user voices an idea for a project ("what if…", "we should…", "idea:"), so it is not lost in the transcript. Pass the project's id from the PROJECT.md card in the folder (the line "project: <id>") or the folder's git remote address; never guess a project from a name. If purmemo cannot be reached the idea waits on this device and the reply says "NOT saved yet": tell the user exactly that, never that it was saved.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        idea: { type: 'string', description: 'The idea in a few words (its heading).' },
+        note: { type: 'string', description: 'One line saying what it is about.' },
+        words: { type: 'string', description: 'What the user said, as close to their words as you have them.' },
+        exact_words: { type: 'boolean', default: false, description: 'True ONLY when "words" is copied letter for letter from the user\'s own message AND session_id is given. Otherwise the words are kept as a note of what was said.' },
+        project_id: { type: 'string', description: 'The id on the project\'s card (PROJECT.md, the line "project: <id>").' },
+        repository: { type: 'string', description: 'The folder\'s git remote address (what `git remote get-url origin` prints), when there is no card id.' },
+        said_in: { type: 'string', enum: IDEA_SURFACES, default: 'terminal_session', description: 'Where it was said.' },
+        session_id: { type: 'string', description: 'The id of this session, when you know it.' }
+      },
+      required: ['idea']
     }
   },
   // ============================================================================
@@ -1956,6 +1982,8 @@ async function dispatchTool(name, args) {
       return withUpdateNotice(await handleReportMemory(args));
     case 'search_past_sessions':
       return withUpdateNotice(await handleSearchPastSessions(args));
+    case 'note_idea':
+      return withUpdateNotice(await handleNoteIdea(args));
     case 'get_acknowledged_errors':
       return withUpdateNotice(await handleGetAcknowledgedErrors(args));
     case 'save_investigation_result':
@@ -2352,6 +2380,8 @@ if (REMOTE_MODE) {
   })
     .then(() => {
       checkForUpdates();
+      // Ideas noted while purmemo could not be reached are sent now (tools/ideas.ts). Nothing waiting = no call.
+      try { sendWaitingIdeasAtStart(); } catch { /* never blocks the start */ }
       structuredLog.info('Purmemo MCP Server started successfully', {
         mode: 'stdio',
         version: CLIENT_VERSION,
