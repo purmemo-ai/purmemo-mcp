@@ -246,6 +246,40 @@ describe('note_idea: pending, honestly', () => {
     assert.ok(existsSync(join(folder, 'idea-broken.json')), 'kept');
   });
 
+  it('a write that fails at its second step leaves no copy behind, so saying the idea again cannot make two', async () => {
+    const folder = join(dir, 'default'); mkdirSync(join(folder, 'idea-blocked.json', 'in-the-way'), { recursive: true }); // the final name is taken by a folder
+    const capture = { client_id: 'idea-blocked', id: '55555555-5555-4555-8555-555555555555', account: 'default', sign_in: FP, created_at: new Date().toISOString(), attempts: 0, body: { title: 'Blocked at the rename', said_in: { surface: 'terminal_session' } } };
+    let err = null; try { writePending('default', capture, env); } catch (e) { err = e; }
+    assert.ok(err, 'the write is refused');
+    assert.equal(err.leftBehind, undefined, 'and says nothing was left');
+    assert.deepEqual(readdirSync(folder).filter((f) => f.endsWith('.tmp')), [], 'no half-done copy waits to be found and sent later');
+    rmSync(join(folder, 'idea-blocked.json'), { recursive: true });
+    const r = await note({ idea: 'Blocked at the rename' }); // he says it again, as the reply asked
+    assert.match(r.content[0].text, /^✅/);
+    assert.equal(seen.filter((x) => x.body && x.body.title === 'Blocked at the rename').length, 1, 'one idea, not two');
+  });
+
+  it('the sign-in file and its account name come from one reading: a switch by another process cannot split them', async () => {
+    const { activeSignIn, accountOfTokenFile } = await import('../dist/auth/accounts.js');
+    const cfg = mkdtempSync(join(tmpdir(), 'note-idea-cfg-')); const keep = { c: process.env.PURMEMO_CONFIG_DIR, p: process.env.PURMEMO_PROFILE };
+    try {
+      process.env.PURMEMO_CONFIG_DIR = cfg; delete process.env.PURMEMO_PROFILE;
+      mkdirSync(join(cfg, 'profiles'));
+      for (const a of ['a@example.com', 'b@example.com']) writeFileSync(join(cfg, 'profiles', `${a}.json`), '{}');
+      writeFileSync(join(cfg, 'active'), 'a@example.com');
+      const first = activeSignIn();
+      writeFileSync(join(cfg, 'active'), 'b@example.com'); // another process switches right after the reading
+      assert.deepEqual([first.account, first.file], ['a@example.com', join(cfg, 'profiles', 'a@example.com.json')], 'the name is the file\'s own');
+      const second = activeSignIn();
+      assert.deepEqual([second.account, second.file], ['b@example.com', join(cfg, 'profiles', 'b@example.com.json')]);
+      assert.equal(accountOfTokenFile(join(cfg, 'auth.json')), null, 'the legacy file has no account name');
+    } finally {
+      if (keep.c === undefined) delete process.env.PURMEMO_CONFIG_DIR; else process.env.PURMEMO_CONFIG_DIR = keep.c;
+      if (keep.p !== undefined) process.env.PURMEMO_PROFILE = keep.p;
+      rmSync(cfg, { recursive: true, force: true });
+    }
+  });
+
   it('once the idea is saved the reply says saved, whatever then goes wrong with the waiting ones', async () => {
     const folder = join(dir, 'default'); mkdirSync(join(folder, 'idea-a-folder-not-a-file.json'), { recursive: true });
     const r = await note({ idea: 'Saved despite a broken queue' });

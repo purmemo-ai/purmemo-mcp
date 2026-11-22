@@ -69,7 +69,7 @@ import {
   runWithApiKey
 } from './lib/api-client.js';
 import { withAccountTools, callOnAccount, transferToolDefinition, handleTransferMemory, TRANSFER_TOOL_NAME } from './tools/accounts.js';
-import { multiAccountEnabled, defaultAccount } from './auth/accounts.js';
+import { multiAccountEnabled, defaultAccount, activeSignIn } from './auth/accounts.js';
 import {
   initHandlers,
   handleSaveConversation,
@@ -2301,10 +2301,11 @@ async function resolveApiKey() {
   // ProfileResolver picks the active file: PURMEMO_PROFILE → active pointer →
   // legacy auth.json.
   try {
-    // The account name and the sign-in are read in one step, with nothing awaited between them: note_idea labels
-    // a capture with this name and sends it with this sign-in.
-    let signedInAs: string | null = null; try { signedInAs = defaultAccount(); } catch { signedInAs = null; }
-    const tokenStore = new TokenStore();
+    // The sign-in file is chosen ONCE and the account name is taken from that file: note_idea labels a capture
+    // with this name and sends it with this sign-in, and another process switching accounts cannot split the two.
+    const signIn = activeSignIn();
+    const signedInAs = signIn.account;
+    const tokenStore = new TokenStore(signIn.file);
     const token = await tokenStore.getToken();
     if (token?.access_token) {
       signInLoadedFor(signedInAs);

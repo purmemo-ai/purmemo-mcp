@@ -47,7 +47,13 @@ const safeId = (id) => String(id).replace(/[^A-Za-z0-9._-]/g, '_');
 function writeAtomic(p: string, text: string) {
   const tmp = `${p}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
   writeFileSync(tmp, text, { mode: 0o600 });
-  renameSync(tmp, p);
+  try { renameSync(tmp, p); } catch (err) {
+    // The half-done copy must not stay: it would be found later and sent, after the person was told the idea is not
+    // saved and said it again (two ideas). If it cannot be removed either, the caller is told it is still there.
+    try { rmSync(tmp, { force: true }); } catch { /* checked next */ }
+    if (existsSync(tmp)) (err as any).leftBehind = true;
+    throw err;
+  }
 }
 
 /** Write (or rewrite) one capture. */

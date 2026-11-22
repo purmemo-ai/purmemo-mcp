@@ -155,6 +155,7 @@ export function createNoteIdea(call = makeSessionsCall, deps: any = {}) {
     if (!remote) {
       try { writePending(account, capture, env); } catch (err) {
         structuredLog.warn('note_idea: could not write the pending file', { error: safeErrorMessage(err) });
+        if ((err as any)?.leftBehind) return text('⏳ The idea is NOT sent yet. A copy of it is on this device, and it is sent by itself once the purmemo pending folder on this device can be written again. Do not say it again: that would make a second idea.', true);
         return text('❌ The idea is NOT saved: it could not be written to this device first, so it was not sent. Check the purmemo pending folder on this device can be written, then say it again.', true);
       }
     }
