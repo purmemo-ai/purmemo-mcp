@@ -259,6 +259,15 @@ describe('note_idea: pending, honestly', () => {
     assert.equal(seen.filter((x) => x.body && x.body.title === 'Blocked at the rename').length, 1, 'one idea, not two');
   });
 
+  it('a copy that could not be removed is said to be left, even when the folder cannot be looked into', async () => {
+    const { writeAtomic } = await import('../dist/lib/pending-ideas.js');
+    const denied = () => Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    let err = null; try { writeAtomic(join(dir, 'idea-locked.json'), '{}', { writeFileSync: () => {}, renameSync: () => { throw denied(); }, rmSync: () => { throw denied(); } }); } catch (e) { err = e; }
+    assert.equal(err && err.leftBehind, true, 'nothing on disk can be seen, and it still says the copy is there');
+    err = null; try { writeAtomic(join(dir, 'idea-locked.json'), '{}', { writeFileSync: () => {}, renameSync: () => { throw denied(); }, rmSync: () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); } }); } catch (e) { err = e; }
+    assert.equal(err && err.leftBehind, undefined, 'a copy that is truly not there is not claimed');
+  });
+
   it('the sign-in file and its account name come from one reading: a switch by another process cannot split them', async () => {
     const { activeSignIn, accountOfTokenFile } = await import('../dist/auth/accounts.js');
     const cfg = mkdtempSync(join(tmpdir(), 'note-idea-cfg-')); const keep = { c: process.env.PURMEMO_CONFIG_DIR, p: process.env.PURMEMO_PROFILE };
