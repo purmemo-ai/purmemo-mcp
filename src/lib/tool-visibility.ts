@@ -12,6 +12,7 @@
  * hides the tool for everyone; on never grants anything.
  *   what_changed          feature 'notebook'         (no switch)
  *   search_past_sessions  feature 'sessions_search'  switch PURMEMO_SESSIONS_BETA=1
+ *   note_idea             feature 'projects'         local connector only; off with PURMEMO_IDEAS_OFF=1
  * Features unknown (the lookup failed or has not answered) = gated tools stay
  * hidden; the core never depends on the lookup.
  *
@@ -26,7 +27,12 @@ export const CORE_TOOLS = ['save_conversation', 'recall_memories', 'get_memory_d
 export const GATED_TOOLS: Record<string, { feature: string; switchOn: (env: NodeJS.ProcessEnv) => boolean }> = {
   what_changed: { feature: 'notebook', switchOn: () => true },
   search_past_sessions: { feature: 'sessions_search', switchOn: (env) => env.PURMEMO_SESSIONS_BETA === '1' },
+  // Idea records (purmemo-next migration 046). Listed for an account holding 'projects'; PURMEMO_IDEAS_OFF=1 hides it for the process.
+  // Local connector only for now: the hosted connector dispatches tools on another path and has no device to keep a pending file on.
+  note_idea: { feature: 'projects', switchOn: (env) => env.PURMEMO_IDEAS_OFF !== '1' && env.PURMEMO_REMOTE !== '1' && !process.argv.includes('--remote') },
 };
+/** Gated tools that capture something the user said: run even when the account's features could not be confirmed. */
+export const CAPTURE_TOOLS = ['note_idea'];
 export const ADMIN_TOOLS = ['get_acknowledged_errors', 'save_investigation_result', 'get_investigations'];
 export const LEGACY_TOOLS = [
   'save_artifact', 'commit',
@@ -88,6 +94,9 @@ export function gatedToolResult(name: string, env: NodeJS.ProcessEnv = process.e
   if (!gate) return null;
   let text: string | null = null;
   if (!gate.switchOn(env)) text = `${name} is not available here.`;
+  // A capture is never lost to a lookup that did not answer: it runs, is kept on the device as pending, and
+  // purmemo itself decides when it is sent (the server checks the feature on every call).
+  else if (!features && CAPTURE_TOOLS.includes(name)) return null;
   else if (!features) text = `Could not confirm what your plan includes just now, so ${name} was not run. Try again in a minute. The rest of purmemo is unaffected.`;
   else if (!features.includes(gate.feature)) text = `${name} is not part of your plan.`;
   return text ? { content: [{ type: 'text', text }], isError: true } : null;

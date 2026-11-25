@@ -9,9 +9,9 @@ import {
 } from '../auth/accounts.js';
 
 /** Tools that accept `account` when several accounts are signed in. */
-export const ACCOUNT_TOOLS = ['save_conversation', 'recall_memories', 'get_memory_details', 'what_changed', 'get_user_context', 'search_past_sessions'];
+export const ACCOUNT_TOOLS = ['save_conversation', 'recall_memories', 'get_memory_details', 'what_changed', 'get_user_context', 'search_past_sessions', 'note_idea'];
 /** Of those, the ones that write (always audit-logged on a non-default account). */
-const WRITE_TOOLS = new Set(['save_conversation']);
+const WRITE_TOOLS = new Set(['save_conversation', 'note_idea']);
 
 export const TRANSFER_TOOL_NAME = 'transfer_memory';
 

@@ -47,6 +47,22 @@ export function defaultAccount(env: NodeJS.ProcessEnv = process.env): string | n
   return readActivePointer();
 }
 
+/** The account a sign-in file belongs to: its own name, or null for the legacy file. Never a second read of the pointer. */
+export function accountOfTokenFile(file: string): string | null {
+  if (file === getLegacyTokenFile()) return null;
+  return path.basename(file, '.json').toLowerCase();
+}
+
+/**
+ * The sign-in this process starts on, read ONCE: the file, and the account that file belongs to. The name is taken
+ * from the file itself, so a switch of the active account by another process at any moment cannot make the name
+ * and the sign-in disagree (note_idea labels a capture with one and sends it with the other).
+ */
+export function activeSignIn(): { file: string; account: string | null } {
+  const file = getActiveTokenFile();
+  return { file, account: accountOfTokenFile(file) };
+}
+
 /** Signed-in accounts on this machine: profiles whose token file exists. Sorted, lowercase. */
 export function signedInAccounts(): string[] {
   return listProfiles()
