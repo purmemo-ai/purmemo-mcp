@@ -425,7 +425,7 @@ const TOOLS = [
         },
         title: {
           type: 'string',
-          description: 'Title for this conversation memory',
+          description: 'Title for this conversation memory. Names a new memory, or renames an existing one. Leave it out when you update an existing memory by conversationId: the memory keeps its title.',
           default: `Conversation ${new Date().toISOString()}`
         },
         conversationId: {
