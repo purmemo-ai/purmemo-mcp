@@ -554,7 +554,7 @@ export async function handleSaveConversation(args) {
     // the text is only a name for a NEW document: the server never lets it replace the title a document
     // already has (it owns that rule; `title_source` is how it is told). Without this an append with no
     // title renamed the document after its latest paragraph.
-    const titleSource: 'given' | 'generated' = title && !title.startsWith('Conversation 202') ? 'given' : 'generated';
+    const titleSource: 'given' | 'generated' = typeof title === 'string' && title.trim() !== '' && !title.startsWith('Conversation 202') ? 'given' : 'generated';
     if (titleSource === 'generated') {
       title = generateIntelligentTitle(intelligentContext, content);
       structuredLog.debug('Generated intelligent title', {

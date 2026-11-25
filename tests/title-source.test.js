@@ -57,6 +57,13 @@ describe('save_conversation: the title says whose it is', () => {
     assert.ok(!body.title.startsWith('Conversation 2026-11-24T10'));
   });
 
+  it('a blank title counts as no title', async () => {
+    await run({ conversationContent: SMALL, title: '   ', conversationId: 'doc-1', mode: 'append' });
+    const [body] = saves();
+    assert.equal(body.title_source, 'generated');
+    assert.ok(body.title.trim().length > 0);
+  });
+
   it('the id made from a title keeps its meaning: slug of the title, source "title"', async () => {
     await run({ conversationContent: SMALL, title: 'Complete Anime Tracking Database' });
     const [body] = saves();
