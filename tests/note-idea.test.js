@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync, readdirSync, existsSync, readFileSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSessionsCall } from '../dist/lib/api-client.js';
-import { createNoteIdea, resendPending, sendWaitingIdeasAtStart, accountForCapture, signInLoadedFor, startedAs, IDEA_SURFACES } from '../dist/tools/ideas.js';
+import { createNoteIdea, safeRepository, resendPending, sendWaitingIdeasAtStart, accountForCapture, signInLoadedFor, startedAs, IDEA_SURFACES } from '../dist/tools/ideas.js';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { listPending, readPending, writePending, pendingSummary, accountFolder, signInFingerprint } from '../dist/lib/pending-ideas.js';
@@ -119,6 +119,71 @@ describe('note_idea: saved', () => {
       assert.match(r.content[0].text, /NOT saved yet: purmemo did not answer \(purmemo answered without confirming/, JSON.stringify(body));
     }
     assert.equal(waiting().length, 4);
+  });
+
+  it('the repository address is only a hint: one purmemo cannot use never turns the idea away, with or without a card id', async () => {
+    const fake = (endpoint, o) => {
+      seen.push({ url: endpoint, body: o?.body ? JSON.parse(o.body) : null });
+      if (endpoint.startsWith('/api/v1/projects/resolve')) {
+        const u = new URL(endpoint, 'http://x');
+        if (u.searchParams.get('repository')) { const e = new Error('API Error 400: {"ok":false,"error":"repository_invalid"}'); e.status = 400; throw e; }
+        return { ok: true, answer: 'found', project: { id: PROJECT, name: 'bauhaus' } };
+      }
+      return { ok: true, saved: true, idea: { id: 'i' } };
+    };
+    const n = createNoteIdea(async (...a) => fake(...a), { env, account: () => 'default', fingerprint: FP });
+    assert.match((await n({ idea: 'A', repository: 'git@github-work:org/r.git' })).content[0].text, /^✅.*not one purmemo can use/s);
+    assert.match((await n({ idea: 'B', repository: 'git@github-work:org/r.git', project_id: PROJECT })).content[0].text, /^✅.*in project bauhaus/s);
+    seen = [];
+    assert.match((await n({ idea: 'C', repository: '/Users/someone/private/repo' })).content[0].text, /^✅.*not one purmemo can use/s);
+    assert.ok(!JSON.stringify(seen).includes('/Users/'), 'a local path is never sent');
+  });
+
+  it('a sign-in inside a repository address is never sent and never kept', async () => {
+    const cases = { 'https://u:ghp_SECRET@github.com/o/r.git?token=SECRET#SECRET': 'https://github.com/o/r.git', 'https://SECRET@github.com/o/r': 'https://github.com/o/r', 'u:SECRET@github.com/o/r': 'github.com/o/r', 'ssh://SECRET@github.com:22/o/r': 'ssh://github.com:22/o/r', 'https://u:p@SECRET@github.com/o/r': 'https://github.com/o/r', 'git@github.com:coladapo/bauhaus.git': 'git@github.com:coladapo/bauhaus.git', 'SECRET@github.com:o/r': 'git@github.com:o/r', 'https://u:a/SECRET@github.com/o/r': null, 'u:SECRET@github.com:o/r': 'github.com:o/r', 'file:///x/SECRET': null, 'C:\\SECRET\\r': null };
+    for (const [from, to] of Object.entries(cases)) assert.equal(safeRepository(from), to, from);
+    mode = 'down'; await note({ idea: 'x', repository: 'https://u:ghp_SECRET@github.com/o/r' });
+    mode = 'refuse'; await note({ idea: 'y', repository: 'https://u:ghp_SECRET@github.com/o/r' });
+    const walk = (d) => readdirSync(d, { withFileTypes: true }).map((f) => (f.isDirectory() ? walk(join(d, f.name)) : readFileSync(join(d, f.name), 'utf8'))).join('');
+    assert.ok(!JSON.stringify(seen).includes('SECRET') && !walk(dir).includes('SECRET'));
+  });
+
+  it('nothing is shortened without saying so', async () => {
+    for (const args of [{ idea: 'x'.repeat(301) }, { idea: 'x', note: 'n'.repeat(4001) }, { idea: 'x', words: 'w'.repeat(20001) }]) {
+      const r = await note(args); assert.equal(r.isError, true); assert.match(r.content[0].text, /NOT saved.*the most is/s);
+    }
+    assert.deepEqual([seen.length, waiting().length], [0, 0]);
+    assert.match((await note({ idea: 'x'.repeat(300), words: 'w'.repeat(20000) })).content[0].text, /^✅/);
+    assert.equal(seen[0].body.words.length, 20000);
+  });
+
+  it('the reply to a saved idea does not wait for a long queue; the queue goes on', async () => {
+    mode = 'down'; for (let i = 0; i < 3; i++) await note({ idea: `old ${i}` }); mode = 'up';
+    const slow = async (e, o) => { if (o?.body?.includes('old ')) await new Promise((ok) => setTimeout(ok, 120)); return call()(e, o); };
+    const t0 = Date.now();
+    const r = await createNoteIdea(slow, { env, account: () => 'default', fingerprint: FP, flushWaitMs: 50 })({ idea: 'new' });
+    assert.ok(Date.now() - t0 < 300); assert.match(r.content[0].text, /^✅.*still being sent/s);
+    for (let i = 0; i < 40 && waiting().length; i++) await new Promise((ok) => setTimeout(ok, 50));
+    assert.deepEqual([waiting().length, ideas.size], [0, 4]);
+  });
+
+  it('one idea purmemo can never answer for does not hold up the others', async () => {
+    mode = 'down'; for (const idea of ['poison', 'b', 'c']) await note({ idea }); mode = 'up';
+    const sick = async (e, o) => { if (o?.body?.includes('poison')) { const x = new Error('API Error 503: {}'); x.status = 503; throw x; } return call()(e, o); };
+    await resendPending('default', sick, env, null, FP); await resendPending('default', sick, env, null, FP);
+    assert.deepEqual(waiting().map((c) => c.body.title), ['poison']);
+  });
+
+  it('"send it again" from purmemo keeps the idea pending; a 403 that is not the plan is not called the plan', async () => {
+    const failing = (status, error) => async () => { const x = new Error(`API Error ${status}: ${JSON.stringify({ ok: false, error })}`); x.status = status; throw x; };
+    const n = (c, fp = FP) => createNoteIdea(c, { env, account: () => 'default', fingerprint: fp });
+    assert.match((await n(failing(409, 'changed_meanwhile'))({ idea: 'a' })).content[0].text, /NOT saved yet/);
+    assert.ok(!/not switched on/.test((await n(failing(403, 'blocked'))({ idea: 'b' })).content[0].text));
+    // Only what will really happen is promised.
+    assert.match((await n(failing(401, 'unauthorized'))({ idea: 'c' })).content[0].text, /only with this same sign-in/);
+    assert.match((await n(failing(401, 'unauthorized'), null)({ idea: 'd' })).content[0].text, /NOT sent by itself/);
+    const later = await createNoteIdea(call(), { env, account: () => 'me@example.com', fingerprint: 'fp2' })({ idea: 'e' });
+    assert.match(later.content[0].text, /1 idea\(s\) on this device were noted with no sign-in/);
   });
 
   it('refuses bad input before anything is written', async () => {

@@ -19,6 +19,7 @@ import { writePending, readPending, removePending, refusePending, pendingSummary
 
 export const IDEA_SURFACES = ['terminal_session', 'bauhaus_conversation', 'cosmo', 'app_voice_note', 'share_sheet', 'other'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const clean = (v) => { const s = typeof v === 'string' ? sanitizeUnicode(v).trim() : ''; return s || null; };
 const str = (v, max) => { const s = typeof v === 'string' ? sanitizeUnicode(v).trim() : ''; return s ? s.slice(0, max) : null; };
 // The account whose sign-in this process loaded. The name of the active account on this machine can be switched
 // under a running connector, and the sign-in in use does not follow. Recorded by the very step that loads the
@@ -39,6 +40,26 @@ export function accountForCapture(scope, startedAs: string | null) {
   if (scope && scope.isDefault && String(scope.email).toLowerCase() !== started) return { mismatch: true };
   return { account: started || 'default' };
 }
+const FLUSH_WAIT_MS = 3000; // the reply to a saved idea never waits longer than this for older ones
+
+/**
+ * A repository address safe to send and to keep: no user, password or token, no query, no local path.
+ * `git remote get-url` prints whatever the remote was set up with, credentials included. null = nothing usable.
+ */
+export function safeRepository(v): string | null {
+  const s = clean(v);
+  if (!s || s.length > 500 || /\s/.test(s) || /^([/\\.~]|[a-z]:[\\/]|file:)/i.test(s)) return null;
+  const bare = s.replace(/[?#].*$/, '');
+  const scp = /^[\w.-]+@([\w.-]+:(?!\/).+)$/.exec(bare);
+  if (scp && !/^[a-z][a-z0-9+.-]*:\/\//i.test(bare)) return scp[1].includes('@') ? null : `git@${scp[1]}`;
+  const scheme = (/^[a-z][a-z0-9+.-]*:\/\//i.exec(bare) || [''])[0];
+  const rest = bare.slice(scheme.length);
+  const slash = rest.indexOf('/');
+  const host = slash < 0 ? rest : rest.slice(0, slash);
+  const out = scheme + host.slice(host.lastIndexOf('@') + 1) + (slash < 0 ? '' : rest.slice(slash));
+  // A credential with a slash in it would still be here: an address has no other '@'.
+  return out.includes('@') ? null : out;
+}
 const text = (t, isError = false) => ({ content: [{ type: 'text', text: t }], ...(isError ? { isError: true } : {}) });
 
 /** The error code purmemo-next sent, from the tagged error's message ("API Error 409: {...}"). */
@@ -49,7 +70,8 @@ function refusalOf(err) {
 // purmemo's own "no" to this capture. Everything else (no network, timeout, 5xx, sign-in, plan not confirmed,
 // rate limit) is "could not ask" and the capture stays pending. A 404 is a "no" only when purmemo names the
 // thing it does not hold; a bare 404 is a server that does not have these routes yet, which is "could not ask".
-const isRefusal = (err) => [400, 409, 413, 422].includes(err?.status) || (err?.status === 404 && refusalOf(err).code === 'unavailable');
+// 409 changed_meanwhile is purmemo asking for it to be sent again.
+const isRefusal = (err) => ([400, 409, 413, 422].includes(err?.status) && refusalOf(err).code !== 'changed_meanwhile') || (err?.status === 404 && refusalOf(err).code === 'unavailable');
 
 /**
  * Send one capture: find its project, then note the idea. → { state: 'saved' | 'pending' | 'refused', … }.
@@ -61,16 +83,27 @@ export async function sendCapture(capture, call = makeSessionsCall) {
     // A session of another account is never named to this one, whatever the file on the device holds.
     if (body.said_in && body.said_in.account) body.said_in = { surface: body.said_in.surface, account: 'another-account' };
     let filed = 'unfiled';
-    if (capture.project_id || capture.repository) {
-      const qs = new URLSearchParams();
-      if (capture.project_id) qs.set('id', capture.project_id);
-      if (capture.repository) qs.set('repository', capture.repository);
-      const r = await call(`/api/v1/projects/resolve?${qs}`, { method: 'GET' });
+    const repository = safeRepository(capture.repository);
+    if (!capture.project_id && capture.repository && !repository) filed = 'repository_unusable';
+    if (capture.project_id || repository) {
+      const ask = (repo) => {
+        const qs = new URLSearchParams();
+        if (capture.project_id) qs.set('id', capture.project_id);
+        if (repo) qs.set('repository', repo);
+        return call(`/api/v1/projects/resolve?${qs}`, { method: 'GET' });
+      };
+      let r; let unusable = false;
+      try { r = await ask(repository); } catch (err) {
+        // The address is a hint about where to file it, never a reason to turn the idea away.
+        if (!(err?.status === 400 && repository && refusalOf(err).code === 'repository_invalid')) throw err;
+        unusable = true;
+        r = capture.project_id ? await ask(null) : null;
+      }
       const byRepo = r?.repository?.answer === 'found' && r.repository.project ? r.repository.project : null;
       if (r?.answer === 'found' && r.project) { body.project_id = r.project.id; filed = r.project.name; }
       else if (r?.answer === 'unavailable' && byRepo) { body.project_id = byRepo.id; filed = byRepo.name; }
       else if (r?.answer === 'unavailable' && capture.project_id) { body.meant_for = capture.project_id; filed = 'meant_for'; }
-      else filed = 'not_known';
+      else filed = unusable ? 'repository_unusable' : 'not_known';
     }
     const saved = await call('/api/v1/ideas', { method: 'POST', body: JSON.stringify(body) });
     // Saved means purmemo SAID saved, and gave the idea back. Any other answer, however polite, is not that.
@@ -78,7 +111,7 @@ export async function sendCapture(capture, call = makeSessionsCall) {
     return { state: 'saved', filed, idea: saved.idea, duplicate: !!saved.duplicate };
   } catch (err) {
     if (isRefusal(err)) { const r = refusalOf(err); return { state: 'refused', reason: r.message || r.code || safeErrorMessage(err), code: r.code }; }
-    return { state: 'pending', why: err?.status === 403 ? 'ideas are not switched on for this account yet' : String(safeErrorMessage(err)).split('\n')[0], status: err?.status ?? null };
+    return { state: 'pending', why: err?.status === 403 && refusalOf(err).code === 'not_on_plan' ? 'ideas are not switched on for this account yet' : String(safeErrorMessage(err)).split('\n')[0], status: err?.status ?? null };
   }
 }
 
@@ -92,7 +125,9 @@ export async function resendPending(account, call = makeSessionsCall, env = proc
   try {
     const fp = fingerprint === undefined ? signInFingerprint(getEffectiveApiKey()) : fingerprint;
     let tried = 0;
-    for (const capture of readPending(account, env).captures) {
+    // Fewest tries first, then oldest: one capture purmemo can never answer for does not hold up the others.
+    const waiting = readPending(account, env).captures.sort((a, b) => (a.attempts || 0) - (b.attempts || 0));
+    for (const capture of waiting) {
       if (capture.client_id === except) continue;
       // Only with the sign-in it was made under, and only for the account whose folder it is in. A capture that
       // does not say (none was ever written that way by a released connector) is left where it is.
@@ -115,13 +150,18 @@ export function createNoteIdea(call = makeSessionsCall, deps: any = {}) {
   const env = deps.env || process.env;
   const now = deps.now || (() => new Date());
   return async function handleNoteIdea(args: any) {
-    const title = str(args?.idea, 300) || str(args?.title, 300);
+    const title = clean(args?.idea) || clean(args?.title);
     if (!title) return text('❌ note_idea needs the idea in a few words, e.g. note_idea({ idea: "Cut the video by voice" })', true);
     const surface = args?.said_in == null ? 'terminal_session' : String(args.said_in);
     if (!IDEA_SURFACES.includes(surface)) return text(`❌ said_in must be one of: ${IDEA_SURFACES.join(', ')}`, true);
     const projectId = str(args?.project_id, 100);
     if (projectId && !UUID.test(projectId)) return text('❌ project_id must be the id on the project\'s card (a UUID). Leave it out and pass repository instead, or neither.', true);
-    const words = str(args?.words, 20000);
+    const words = clean(args?.words);
+    // Never shortened without a word: what is saved is what was said.
+    const ideaNote = clean(args?.note);
+    for (const [what, v, max] of [['idea', title, 300], ['note', ideaNote, 4000], ['words', words, 20000]] as any) {
+      if (v && v.length > max) return text(`❌ The idea is NOT saved: ${what} is ${v.length} characters and the most is ${max}. Nothing was written. ${what === 'idea' ? 'Say the idea in a few words and put the rest in note or words.' : 'Shorten it, or note it as more than one idea.'}`, true);
+    }
     const session = str(args?.session_id, 300);
     // "His exact words" is a claim: it needs the words and the session they are in. Otherwise it is a note of what he said.
     // The account this call runs on: the one named by `account`, else this machine's default sign-in.
@@ -141,9 +181,9 @@ export function createNoteIdea(call = makeSessionsCall, deps: any = {}) {
     const remote = isRemoteMode(env);
     const capture = {
       client_id: `idea-${randomUUID()}`, id: randomUUID(), account, sign_in: fingerprint, created_at: now().toISOString(), attempts: 0,
-      project_id: projectId ? projectId.toLowerCase() : null, repository: str(args?.repository, 500),
+      project_id: projectId ? projectId.toLowerCase() : null, repository: safeRepository(args?.repository) || (clean(args?.repository) ? 'unusable' : null),
       body: {
-        title, note: str(args?.note, 4000), words, words_are: exact ? 'his_exact' : 'noted', said_at: now().toISOString(),
+        title, note: ideaNote, words, words_are: exact ? 'his_exact' : 'noted', said_at: now().toISOString(),
         // Into another account: the surface, and the plain fact that the session lives elsewhere. Not the machine,
         // not the session id, not the name of the account it lives in: none of those leave this account's requests.
         said_in: elsewhere ? { surface, account: 'another-account' } : { surface, ...(remote ? {} : { machine: hostname() }), ...(session ? { session } : {}) },
@@ -164,16 +204,25 @@ export function createNoteIdea(call = makeSessionsCall, deps: any = {}) {
     if (r.state === 'saved') {
       if (!remote) { try { removePending(account, capture.client_id, env); } catch { /* a later pass finds it and purmemo answers "already saved" */ } }
       // The idea IS saved from here on: nothing that follows may turn this reply into a failure.
-      let flushed = { sent: 0, refused: 0, other_sign_in: 0 }; let waitingNote = '';
+      let flushed: any = { sent: 0, refused: 0, other_sign_in: 0 }; let waitingNote = '';
       if (!remote) {
-        flushed = await resendPending(account, call, env, capture.client_id, fingerprint);
+        // A reply that takes too long is taken for a failure, and saying it again would be a second idea. Older ones
+        // get a moment; the rest go on being sent after the reply.
+        let timer;
+        const flushing = resendPending(account, call, env, capture.client_id, fingerprint);
+        const first = await Promise.race([flushing, new Promise((ok) => { timer = setTimeout(() => ok(null), deps.flushWaitMs ?? FLUSH_WAIT_MS); })]);
+        clearTimeout(timer);
+        if (first) flushed = first; else waitingNote += ' Ideas that were waiting on this device are still being sent.';
         try {
           const left = pendingSummary(account, env, now().getTime(), fingerprint);
           if (left.unreadable) waitingNote += ` ${left.unreadable} file(s) in this device's pending folder could not be read; they are kept there and need a look.`;
           if (left.other_sign_in) waitingNote += ` ${left.other_sign_in} idea(s) on this device were captured under a different sign-in and wait for it; they are not sent with this one.`;
+          const unsigned = accountFolder(account) === 'default' ? 0 : pendingSummary('default', env, now().getTime()).no_sign_in;
+          if (unsigned) waitingNote += ` ${unsigned} idea(s) on this device were noted with no sign-in and are not sent by themselves; say them again if they still matter.`;
         } catch { /* the reply stands */ }
       }
       const where = r.filed === 'unfiled' ? 'not filed under a project (none was named)'
+        : r.filed === 'repository_unusable' ? 'not filed under a project: the repository address given is not one purmemo can use. It is in your unfiled ideas.'
         : r.filed === 'not_known' ? 'not filed under a project: purmemo does not know this repository in this account yet. It is in your unfiled ideas.'
           : r.filed === 'meant_for' ? 'kept in this account, unfiled, marked as meant for a project this account cannot reach'
             : `in project ${r.filed}`;
@@ -189,8 +238,12 @@ export function createNoteIdea(call = makeSessionsCall, deps: any = {}) {
     }
     structuredLog.warn('note_idea: pending', { status: r.status });
     if (remote) return text(`⚠️ The idea is NOT saved: purmemo did not answer (${r.why}). Say it again in a minute.`, true);
+    // Promise only what happens: a waiting idea is sent with the very sign-in it was made under, and no other.
+    const again = !fingerprint ? 'and is NOT sent by itself, because it was noted with no sign-in. Sign in, then say it again.'
+      : r.status === 401 ? 'and is sent again only with this same sign-in. If you have to sign in again, it stays on this device and is not sent by itself: say it again then.'
+        : `and will be sent again with this sign-in the next time an idea is noted${elsewhere ? ' into this account' : ' and when the connector starts'}.`;
     const s = pendingSummary(account, env, now().getTime(), fingerprint);
-    return text(`⏳ NOT saved yet: purmemo did not answer (${r.why}). The idea is waiting on this device as pending and will be sent again the next time an idea is noted and when the connector starts. Waiting on this device: ${s.count}${s.oldest_hours >= 24 ? `, the oldest for ${Math.round(s.oldest_hours)} hours` : ''}.${s.unreadable ? ` ${s.unreadable} file(s) in this device's pending folder could not be read; they are kept there and need a look.` : ''}${noteExact}`);
+    return text(`⏳ NOT saved yet: purmemo did not answer (${r.why}). The idea is waiting on this device as pending ${again} Waiting on this device: ${s.count}${s.oldest_hours >= 24 ? `, the oldest for ${Math.round(s.oldest_hours)} hours` : ''}.${s.unreadable ? ` ${s.unreadable} file(s) in this device's pending folder could not be read; they are kept there and need a look.` : ''}${noteExact}`);
   };
 }
 

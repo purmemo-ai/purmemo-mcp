@@ -22,7 +22,7 @@ export const PENDING_RESEND_MAX = 25; // per pass: a long outage is caught up ov
 export const TMP_ORPHAN_MS = 60 * 1000;      // a half-finished write older than this was left by a crash
 
 export function pendingRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return (env.PURMEMO_PENDING_DIR || '').trim() || join(homedir(), '.purmemo', 'pending');
+  return (env.PURMEMO_PENDING_DIR || '').trim() || join((env.PURMEMO_CONFIG_DIR || '').trim() || join(homedir(), '.purmemo'), 'pending');
 }
 /**
  * A folder name for an account. One account, one folder: every character outside a small safe set is written as
@@ -130,11 +130,11 @@ export function refusePending(account, capture, reason: string, env: NodeJS.Proc
 }
 /**
  * How many are waiting, how old the oldest is (hours), how many files cannot be read, and how many were captured
- * under a different sign-in than `fingerprint` (those wait for their own sign-in and are not sent with this one).
+ * under a different sign-in (or none) than `fingerprint` (those wait for their own sign-in and are not sent with this one).
  */
 export function pendingSummary(account, env: NodeJS.ProcessEnv = process.env, now = Date.now(), fingerprint: string | null = null) {
   const { captures, unreadable } = readPending(account, env, now);
   const oldest = captures.length ? Math.max(0, (now - new Date(captures[0].created_at).getTime()) / 3600000) : 0;
-  const other = fingerprint ? captures.filter((c) => c.sign_in && c.sign_in !== fingerprint).length : 0;
-  return { count: captures.length, oldest_hours: Math.round(oldest * 10) / 10, unreadable: unreadable.length, other_sign_in: other };
+  const other = fingerprint ? captures.filter((c) => c.sign_in !== fingerprint).length : 0;
+  return { count: captures.length, oldest_hours: Math.round(oldest * 10) / 10, unreadable: unreadable.length, other_sign_in: other, no_sign_in: captures.filter((c) => !c.sign_in).length };
 }
